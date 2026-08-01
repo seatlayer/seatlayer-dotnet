@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- netstandard2.0 would reach .NET Framework, but System.Text.Json and
+         nullable reference types are worth more here than that reach. net8.0 is
+         the current LTS. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>SeatLayer</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>SeatLayer</Authors>
+    <Company>SeatLayer</Company>
+    <Description>Official .NET server SDK for the SeatLayer reserved-seating API. Server-side only.</Description>
+    <PackageTags>seatlayer;reserved-seating;seating-chart;ticketing;box-office</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://docs.seatlayer.io/server-sdk/install/</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/seatlayer/seatlayer-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <!-- No package references. HttpClient, System.Text.Json and HMACSHA256 all
+       ship with the framework, so the SDK forces no version on a consumer. -->
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>
