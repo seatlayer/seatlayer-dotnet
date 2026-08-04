@@ -24,8 +24,22 @@
     <RepositoryUrl>https://github.com/seatlayer/seatlayer-dotnet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Copyright>Copyright (c) 2026 SeatLayer</Copyright>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <!-- Reproducible builds + Source Link. The .NET 8 SDK bundles the GitHub
+       Source Link provider, so this needs no PackageReference and therefore
+       still adds nothing to a consumer's dependency graph.
+       ContinuousIntegrationBuild normalises source paths into the PDB, which is
+       what makes the build byte-reproducible — but it also breaks local
+       step-into debugging, so it is switched on only under CI. -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <!-- No package references. HttpClient, System.Text.Json and HMACSHA256 all
