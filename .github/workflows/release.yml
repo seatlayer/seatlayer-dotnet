@@ -1,0 +1,120 @@
+name: Release
+
+# Publishes to NuGet.org via Trusted Publishing (OIDC). No long-lived API key
+# exists in this repository, in Actions secrets, or in Doppler — NuGet/login
+# exchanges the GitHub OIDC token for an API key that lives one hour.
+#
+# To release: push a tag matching <Version> in src/SeatLayer/SeatLayer.csproj.
+#
+#     git tag v0.1.0 && git push origin v0.1.0
+#
+# NUGET_USER is a repository variable (not a secret — it is a public profile
+# name), set with:
+#   gh variable set NUGET_USER --repo seatlayer/seatlayer-dotnet --body '<name>'
+# It must be the nuget.org USERNAME, never the account's email address.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Gate
+        run: |
+          dotnet restore
+          dotnet build --no-restore -c Release
+          dotnet test --no-build -c Release
+
+      - name: Refuse to publish if the tag and <Version> disagree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/SeatLayer/SeatLayer.csproj)"
+          if [ "$tag" != "$ver" ]; then
+            echo "::error::tag v$tag does not match <Version> $ver"
+            exit 1
+          fi
+
+      - name: Pack
+        run: |
+          rm -rf ./artifacts
+          dotnet pack src/SeatLayer/SeatLayer.csproj --no-build -c Release -o ./artifacts
+
+      # A NuGet version can NEVER be re-pushed, only unlisted, so the shape of the
+      # very first push is permanent. RELEASE.md lists these four checks for a
+      # human to do by eye; they are asserted here instead.
+      - name: The package must be exactly what RELEASE.md documents
+        run: |
+          pkg="$(ls ./artifacts/*.nupkg)"
+          snup="$(ls ./artifacts/*.snupkg)"
+          unzip -l "$pkg"
+
+          unzip -l "$pkg" | grep -q "lib/net8.0/SeatLayer.dll" \
+            || { echo "::error::missing lib/net8.0/SeatLayer.dll"; exit 1; }
+
+          # Without the XML docs, IntelliSense is blank for every consumer.
+          unzip -l "$pkg" | grep -q "lib/net8.0/SeatLayer.xml" \
+            || { echo "::error::missing XML docs — IntelliSense would be blank"; exit 1; }
+
+          # The test project sets IsPackable=false. If that regressed we would be
+          # shipping xunit to every consumer.
+          if unzip -l "$pkg" | grep -qi "SeatLayer.Tests"; then
+            echo "::error::test assembly leaked into the package"; exit 1
+          fi
+
+          # Symbols belong in the .snupkg, never the .nupkg.
+          unzip -l "$snup" | grep -q "lib/net8.0/SeatLayer.pdb" \
+            || { echo "::error::symbols package is missing the pdb"; exit 1; }
+
+          # This SDK deliberately has zero package references. A dependency
+          # appearing here means someone added one.
+          if unzip -p "$pkg" SeatLayer.nuspec | grep -q "<dependency "; then
+            echo "::error::the SDK is meant to be dependency-free"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          # The .snupkg travels with it: `dotnet nuget push` sends the symbols
+          # package alongside only when it sits next to the .nupkg.
+          path: |
+            ./artifacts/*.nupkg
+            ./artifacts/*.snupkg
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: nuget
+      url: https://www.nuget.org/packages/SeatLayer
+    permissions:
+      # Required for OIDC, scoped to the job that actually publishes.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: ./artifacts
+
+      # NuGet's temporary key is valid for ONE HOUR and is single-use: one OIDC
+      # token buys exactly one key. So log in immediately before the push, never
+      # earlier in the job.
+      - name: NuGet login (OIDC to short-lived key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Push
+        run: >-
+          dotnet nuget push ./artifacts/*.nupkg
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
