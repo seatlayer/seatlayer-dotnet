@@ -468,7 +468,7 @@ public class ClientTests
 
         Assert.Equal(
             "https://api.seatlayer.io/v1/events/ev_1/bookings/order%20%2F%2042",
-            handler.Calls[0].Url.ToString());
+            handler.Calls[0].Url.AbsoluteUri);
     }
 
     [Fact]
