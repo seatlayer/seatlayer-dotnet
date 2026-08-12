@@ -417,6 +417,70 @@ public class ClientTests
     }
 
     [Fact]
+    public async Task HoldCarriesChannelAuthority()
+    {
+        var (client, handler) = Build(new[] { Ok("{\"holdId\":\"h_1\"}") });
+        await client.Inventory.HoldAsync(
+            "ev_1",
+            new[] { "A-1" },
+            channelIds: new[] { "ch_partner" },
+            ignoreChannelRestrictions: false,
+            reason: "partner checkout");
+
+        var body = JsonDocument.Parse(handler.Calls[0].Body!);
+        Assert.Equal("ch_partner", body.RootElement.GetProperty("channelIds")[0].GetString());
+        Assert.False(body.RootElement.GetProperty("ignoreChannelRestrictions").GetBoolean());
+        Assert.Equal("partner checkout", body.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task CreatesOriginBoundBuyerAccessSession()
+    {
+        var (client, handler) = Build(new[] { Status(HttpStatusCode.Created, "{\"token\":\"bas_x\"}") });
+        await client.Channels.CreateBuyerAccessSessionAsync(
+            "ev/1",
+            new BuyerAccessSessionRequest
+            {
+                IncludePublic = false,
+                AllowedOrigin = "https://partner.example",
+                ChannelIds = new[] { "ch_1" },
+                MaxQuantity = 4,
+                IdempotencyKey = "partner-order-42",
+            });
+
+        Assert.Equal(
+            "https://api.seatlayer.io/v1/events/ev%2F1/buyer-access-sessions",
+            handler.Calls[0].Url.ToString());
+        Assert.Equal(
+            "partner-order-42",
+            handler.Calls[0].Headers.GetValues("Idempotency-Key").Single());
+        var body = JsonDocument.Parse(handler.Calls[0].Body!);
+        Assert.False(body.RootElement.GetProperty("includePublic").GetBoolean());
+        Assert.Equal("https://partner.example", body.RootElement.GetProperty("allowedOrigin").GetString());
+        Assert.Equal("ch_1", body.RootElement.GetProperty("channelIds")[0].GetString());
+    }
+
+    [Fact]
+    public async Task ReadsBookingByTrimmedEncodedReference()
+    {
+        var (client, handler) = Build(new[] { Ok("{\"bookingRef\":\"order / 42\"}") });
+        await client.Inventory.RetrieveBookingAsync("ev_1", "  order / 42  ");
+
+        Assert.Equal(
+            "https://api.seatlayer.io/v1/events/ev_1/bookings/order%20%2F%2042",
+            handler.Calls[0].Url.ToString());
+    }
+
+    [Fact]
+    public async Task RejectsBlankBookingReferenceBeforeRequest()
+    {
+        var (client, _) = Build(Array.Empty<(HttpStatusCode, string, IDictionary<string, string>)>());
+        var error = await Assert.ThrowsAsync<ArgumentException>(
+            () => client.Inventory.UnbookAsync("ev_1", new[] { "A-1" }, "   "));
+        Assert.Contains("bookingRef is required", error.Message);
+    }
+
+    [Fact]
     public async Task SpentHoldIsAConflict()
     {
         var (client, _) = Build(new[]

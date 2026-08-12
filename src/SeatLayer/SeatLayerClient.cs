@@ -79,6 +79,7 @@ public sealed class SeatLayerClient : IDisposable
             : "unknown";
 
         Charts = new ChartsService(this);
+        Channels = new ChannelsService(this);
         Events = new EventsService(this);
         Inventory = new InventoryService(this);
         Sessions = new SessionsService(this);
@@ -91,6 +92,9 @@ public sealed class SeatLayerClient : IDisposable
 
     /// <summary>Seat-map definitions that events are created from.</summary>
     public ChartsService Charts { get; }
+
+    /// <summary>Private allocations, reporting, and origin-bound buyer access.</summary>
+    public ChannelsService Channels { get; }
 
     /// <summary>Event lifecycle, metadata and reports.</summary>
     public EventsService Events { get; }

@@ -20,6 +20,39 @@ public sealed class BestAvailableRequest
 
     /// <summary>Makes a retried call collapse into the original.</summary>
     public string? IdempotencyKey { get; set; }
+
+    /// <summary>Private allocation channels whose inventory this sale may use.</summary>
+    public IEnumerable<string>? ChannelIds { get; set; }
+
+    /// <summary>Explicit privileged override for allocation restrictions.</summary>
+    public bool? IgnoreChannelRestrictions { get; set; }
+
+    /// <summary>Audit reason for channel use or a privileged override.</summary>
+    public string? Reason { get; set; }
+}
+
+/// <summary>Filters and paging for booking lifecycle records.</summary>
+public sealed class BookingListRequest
+{
+    /// <summary>Searches stable booking references.</summary>
+    public string? Query { get; set; }
+
+    /// <summary>Restricts results to one lifecycle state.</summary>
+    public string? State { get; set; }
+
+    /// <summary>Page size.</summary>
+    public int? Limit { get; set; }
+
+    /// <summary>Continues a previous page.</summary>
+    public string? Cursor { get; set; }
+
+    internal Dictionary<string, string?> ToQuery() => new()
+    {
+        ["q"] = Query,
+        ["state"] = State,
+        ["limit"] = Limit?.ToString(),
+        ["cursor"] = Cursor,
+    };
 }
 
 /// <summary>
@@ -51,10 +84,16 @@ public sealed class InventoryService
         IEnumerable<string> labels,
         long? ttlMs = null,
         string? idempotencyKey = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IEnumerable<string>? channelIds = null,
+        bool? ignoreChannelRestrictions = null,
+        string? reason = null)
         => _client.PostAsync(
             Path(eventKey, "/hold"),
-            Body.Of(("labels", labels.ToList()), ("ttlMs", ttlMs)),
+            Body.Of(
+                ("labels", labels.ToList()), ("ttlMs", ttlMs),
+                ("channelIds", channelIds?.ToList()),
+                ("ignoreChannelRestrictions", ignoreChannelRestrictions), ("reason", reason)),
             idempotencyKey,
             cancellationToken);
 
@@ -71,7 +110,10 @@ public sealed class InventoryService
             Path(eventKey, "/best-available"),
             Body.Of(
                 ("qty", request.Qty), ("categoryKey", request.CategoryKey),
-                ("zoneId", request.ZoneId), ("ttlMs", request.TtlMs)),
+                ("zoneId", request.ZoneId), ("ttlMs", request.TtlMs),
+                ("channelIds", request.ChannelIds?.ToList()),
+                ("ignoreChannelRestrictions", request.IgnoreChannelRestrictions),
+                ("reason", request.Reason)),
             request.IdempotencyKey,
             cancellationToken);
 
@@ -97,8 +139,11 @@ public sealed class InventoryService
         return _client.PostAsync(
             Path(eventKey, "/best-available-book"),
             Body.Of(
-                ("qty", request.Qty), ("bookingRef", request.BookingRef),
-                ("categoryKey", request.CategoryKey), ("zoneId", request.ZoneId)),
+                ("qty", request.Qty), ("bookingRef", NormalizeBookingRef(request.BookingRef)),
+                ("categoryKey", request.CategoryKey), ("zoneId", request.ZoneId),
+                ("channelIds", request.ChannelIds?.ToList()),
+                ("ignoreChannelRestrictions", request.IgnoreChannelRestrictions),
+                ("reason", request.Reason)),
             request.IdempotencyKey,
             cancellationToken);
     }
@@ -138,21 +183,33 @@ public sealed class InventoryService
 
     /// <summary>Books a previously held selection.</summary>
     public Task<IReadOnlyDictionary<string, object?>> BookAsync(
-        string eventKey, string holdId, string? bookingRef = null,
-        string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        string eventKey, string holdId, string bookingRef,
+        string? idempotencyKey = null, CancellationToken cancellationToken = default,
+        IEnumerable<string>? channelIds = null,
+        bool? ignoreChannelRestrictions = null,
+        string? reason = null)
         => _client.PostAsync(
             Path(eventKey, "/book"),
-            Body.Of(("holdId", holdId), ("bookingRef", bookingRef)),
+            Body.Of(
+                ("holdId", holdId), ("bookingRef", NormalizeBookingRef(bookingRef)),
+                ("channelIds", channelIds?.ToList()),
+                ("ignoreChannelRestrictions", ignoreChannelRestrictions), ("reason", reason)),
             idempotencyKey,
             cancellationToken);
 
     /// <summary>Books labels outright, with no prior hold.</summary>
     public Task<IReadOnlyDictionary<string, object?>> BookLabelsAsync(
         string eventKey, IEnumerable<string> labels, string bookingRef,
-        string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        string? idempotencyKey = null, CancellationToken cancellationToken = default,
+        IEnumerable<string>? channelIds = null,
+        bool? ignoreChannelRestrictions = null,
+        string? reason = null)
         => _client.PostAsync(
             Path(eventKey, "/book"),
-            Body.Of(("labels", labels.ToList()), ("bookingRef", bookingRef)),
+            Body.Of(
+                ("labels", labels.ToList()), ("bookingRef", NormalizeBookingRef(bookingRef)),
+                ("channelIds", channelIds?.ToList()),
+                ("ignoreChannelRestrictions", ignoreChannelRestrictions), ("reason", reason)),
             idempotencyKey,
             cancellationToken);
 
@@ -162,15 +219,19 @@ public sealed class InventoryService
         string? idempotencyKey = null, CancellationToken cancellationToken = default)
         => _client.PostAsync(
             Path(eventKey, "/box-book"),
-            Body.Of(("labels", labels.ToList()), ("bookingRef", bookingRef)),
+            Body.Of(("labels", labels.ToList()), ("bookingRef", NormalizeBookingRef(bookingRef))),
             idempotencyKey,
             cancellationToken);
 
     /// <summary>Reverses a booking. Requires a key with cancel authority.</summary>
     public Task<IReadOnlyDictionary<string, object?>> UnbookAsync(
-        string eventKey, IEnumerable<string> labels, CancellationToken cancellationToken = default)
+        string eventKey, IEnumerable<string> labels, string bookingRef,
+        CancellationToken cancellationToken = default)
         => _client.PostAsync(
-            Path(eventKey, "/unbook"), Body.Of(("labels", labels.ToList())), null, cancellationToken);
+            Path(eventKey, "/unbook"),
+            Body.Of(("labels", labels.ToList()), ("bookingRef", NormalizeBookingRef(bookingRef))),
+            null,
+            cancellationToken);
 
     /// <summary>Holds inventory back from sale (house seats, production holds).</summary>
     public Task<IReadOnlyDictionary<string, object?>> BlockAsync(
@@ -198,6 +259,37 @@ public sealed class InventoryService
     public Task<IReadOnlyDictionary<string, object?>> UpdateAvailabilityAsync(
         string eventKey, IDictionary<string, object?> fields, CancellationToken cancellationToken = default)
         => _client.PostAsync(Path(eventKey, "/availability"), fields, null, cancellationToken);
+
+    /// <summary>Lists one page of booking lifecycle records, newest first.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> ListBookingsAsync(
+        string eventKey,
+        BookingListRequest? request = null,
+        CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            Path(eventKey, "/bookings"),
+            (request ?? new BookingListRequest()).ToQuery(),
+            cancellationToken);
+
+    /// <summary>Retrieves a booking lifecycle by its stable reference.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> RetrieveBookingAsync(
+        string eventKey, string bookingRef, CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            Path(eventKey, $"/bookings/{SeatLayerClient.Escape(NormalizeBookingRef(bookingRef))}"),
+            null,
+            cancellationToken);
+
+    private static string NormalizeBookingRef(string? bookingRef)
+    {
+        var value = bookingRef?.Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            throw new ArgumentException(
+                "bookingRef is required and must be a non-empty stable reference.",
+                nameof(bookingRef));
+        }
+
+        return value;
+    }
 }
 
 /// <summary>

@@ -89,6 +89,41 @@ await client.Inventory.BookBestAvailableAsync(eventKey,
 await client.Inventory.BoxOfficeBookAsync(eventKey, new[] { "A-1", "A-2" }, "comp-14");
 ```
 
+## Private and partner sales
+
+Channels reserve inventory for a partner, member group, presale, or other private allocation. A
+buyer access session is short-lived and origin-bound, so the browser receives only the allocation
+it is allowed to sell; your secret key remains on your server.
+
+```csharp
+var channel = await client.Channels.CreateAsync(eventKey, new CreateChannelRequest
+{
+    Name = "Venue members",
+    AccessIntent = "private",
+});
+
+await client.Channels.UpdateAssignmentsAsync(
+    eventKey,
+    new[] { "A-1", "A-2" },
+    assignmentVersion: 1,
+    targetChannelId: "ch_members");
+
+var access = await client.Channels.CreateBuyerAccessSessionAsync(
+    eventKey,
+    new BuyerAccessSessionRequest
+    {
+        IncludePublic = false,
+        AllowedOrigin = "https://members.example",
+        ChannelIds = new[] { "ch_members" },
+        MaxQuantity = 2,
+    });
+```
+
+Pass the returned token to the buyer SDK. For trusted backend sales, provide `ChannelIds` on a
+`BestAvailableRequest`, or use the named `channelIds` argument on `HoldAsync`, `BookAsync`, or
+`BookLabelsAsync`. `IgnoreChannelRestrictions = true` is an explicit privileged override and
+should be accompanied by an audit `Reason`.
+
 ## Listing and pagination
 
 `ListAsync` returns one `Page` plus a cursor. `ListAllAsync` is an async stream that pages as you
@@ -253,7 +288,8 @@ await client.SendAsync(HttpMethod.Post, "/v1/events/ev_1/some-new-route",
 | --- | --- |
 | `Charts` | `ListAsync` `ListAllAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` `DeleteAsync` `CopyAsync` `ArchiveAsync` `UnarchiveAsync` `PublishAsync` |
 | `Events` | `ListAsync` `ListAllAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` `DeleteAsync` `UpdateChartAsync` `CloseAsync` `ReopenAsync` `ArchiveAsync` `RetrieveHoldTtlAsync` `UpdateHoldTtlAsync` `RetrieveReportAsync` `RetrieveLogAsync` |
-| `Inventory` | `HoldAsync` `HoldBestAvailableAsync` `BookBestAvailableAsync` `ExtendHoldAsync` `RetrieveHoldAsync` `ReleaseAsync` `BookAsync` `BookLabelsAsync` `BoxOfficeBookAsync` `UnbookAsync` `BlockAsync` `UnblockAsync` `UnblockAllAsync` `RetrieveAvailabilityAsync` `UpdateAvailabilityAsync` |
+| `Channels` | `ListAsync` `CreateAsync` `UpdateAsync` `UpdateAssignmentsAsync` `ListAllocationAsync` `RetrieveAccessPreviewAsync` `RetrieveReportAsync` `PauseAsync` `UnpauseAsync` `ArchiveAsync` `CreateBuyerAccessSessionAsync` `ListBuyerAccessSessionsAsync` `RevokeBuyerAccessSessionAsync` |
+| `Inventory` | `HoldAsync` `HoldBestAvailableAsync` `BookBestAvailableAsync` `ExtendHoldAsync` `RetrieveHoldAsync` `ReleaseAsync` `BookAsync` `BookLabelsAsync` `BoxOfficeBookAsync` `UnbookAsync` `BlockAsync` `UnblockAsync` `UnblockAllAsync` `RetrieveAvailabilityAsync` `UpdateAvailabilityAsync` `ListBookingsAsync` `RetrieveBookingAsync` |
 | `Sessions` | `CreateManageSessionAsync` `RevokeManageSessionAsync` `CreateDesignerSessionAsync` `RevokeDesignerSessionAsync` |
 | `Webhooks` | `ListAsync` `CreateAsync` `UpdateAsync` `DeleteAsync` `ListDeliveriesAsync` |
 | `Workspaces` | `ListAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` |
@@ -267,24 +303,26 @@ Full reference: [docs.seatlayer.io/server-sdk](https://docs.seatlayer.io/server-
 - [Webhook verification](https://docs.seatlayer.io/server-sdk/webhooks/)
 - [Server API reference](https://docs.seatlayer.io/server-api/events/)
 - [OpenAPI description](https://docs.seatlayer.io/openapi.json)
+- [Agent-readable documentation](https://docs.seatlayer.io/llms.txt)
 - [SeatLayer GitHub organization](https://github.com/seatlayer)
 
 ### Other SeatLayer SDKs
 
 | Surface | Package |
 |---|---|
-| Browser (vanilla) | [`@seatlayer/js`](https://github.com/seatlayer/seatlayer-sdk) |
-| React | [`@seatlayer/react`](https://github.com/seatlayer/seatlayer-sdk) |
-| React Native | [`@seatlayer/react-native`](https://github.com/seatlayer/seatlayer-react-native) |
+| Browser (vanilla) | [`@seatlayer/js`](https://www.npmjs.com/package/@seatlayer/js) |
+| React | [`@seatlayer/react`](https://www.npmjs.com/package/@seatlayer/react) |
+| React Native | [`@seatlayer/react-native`](https://www.npmjs.com/package/@seatlayer/react-native) |
 | iOS | [`seatlayer-ios`](https://github.com/seatlayer/seatlayer-ios) |
 | Android | [`seatlayer-android`](https://github.com/seatlayer/seatlayer-android) |
-| Flutter | [`seatlayer_flutter`](https://github.com/seatlayer/seatlayer-flutter) |
-| Node.js (server) | [`@seatlayer/server`](https://github.com/seatlayer/seatlayer-node) |
-| Python (server) | [`seatlayer`](https://github.com/seatlayer/seatlayer-python) |
-| PHP (server) | [`seatlayer/seatlayer-php`](https://github.com/seatlayer/seatlayer-php) |
-| Java (server) | [`io.seatlayer:seatlayer-java`](https://github.com/seatlayer/seatlayer-java) |
-| Go (server) | [`github.com/seatlayer/seatlayer-go`](https://github.com/seatlayer/seatlayer-go) |
-| Ruby (server) | [`seatlayer`](https://github.com/seatlayer/seatlayer-ruby) |
+| Flutter | [`seatlayer`](https://pub.dev/packages/seatlayer) |
+| Node.js (server) | [`@seatlayer/server`](https://www.npmjs.com/package/@seatlayer/server) |
+| Python (server) | [`seatlayer`](https://pypi.org/project/seatlayer/) |
+| PHP (server) | [`seatlayer/seatlayer-php`](https://packagist.org/packages/seatlayer/seatlayer-php) |
+| Java (server) | [`io.seatlayer:seatlayer-java`](https://central.sonatype.com/artifact/io.seatlayer/seatlayer-java) |
+| Go (server) | [`github.com/seatlayer/seatlayer-go`](https://pkg.go.dev/github.com/seatlayer/seatlayer-go) |
+| Ruby (server) | [`seatlayer`](https://rubygems.org/gems/seatlayer) |
+| .NET (server) | [`SeatLayer`](https://www.nuget.org/packages/SeatLayer) |
 
 ## Development
 
