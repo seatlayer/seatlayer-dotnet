@@ -1,5 +1,9 @@
 # SeatLayer .NET SDK
 
+[![CI](https://github.com/seatlayer/seatlayer-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/seatlayer/seatlayer-dotnet/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/SeatLayer.svg)](https://www.nuget.org/packages/SeatLayer)
+[![License: MIT](https://img.shields.io/badge/license-MIT-111827.svg)](LICENSE)
+
 Official .NET server SDK for the [SeatLayer](https://seatlayer.io) reserved-seating API.
 
 > **Server-side only.** This library authenticates with your secret key. Never ship it in a client
