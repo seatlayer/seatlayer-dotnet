@@ -51,6 +51,23 @@ public sealed class ChartCopyRequest
     public string? IdempotencyKey { get; set; }
 }
 
+/// <summary>Optional overrides when materializing a published template as a chart draft.</summary>
+public sealed class TemplateInstantiateRequest
+{
+    /// <summary>Name for the materialized chart draft.</summary>
+    public string? Name { get; set; }
+    /// <summary>Workspace that owns the materialized draft.</summary>
+    public string? WorkspaceId { get; set; }
+    /// <summary>Optional complete chart document to validate in place of the template document.</summary>
+    public IDictionary<string, object?>? EditedDoc { get; set; }
+    /// <summary>Published template version to materialize.</summary>
+    public int? Version { get; set; }
+    /// <summary>SHA-256 of the expected published template version.</summary>
+    public string? Sha256 { get; set; }
+    /// <summary>Optional caller key for exact server replay.</summary>
+    public string? IdempotencyKey { get; set; }
+}
+
 /// <summary>
 /// Seat-map definitions that events are created from.
 /// </summary>
@@ -196,6 +213,39 @@ public sealed class ChartsService
             $"/v1/charts/{SeatLayerClient.Escape(chartId)}/publish", null, null, cancellationToken);
 }
 
+/// <summary>Published catalog templates that can be materialized as workspace chart drafts.</summary>
+public sealed class TemplatesService
+{
+    private readonly SeatLayerClient _client;
+
+    internal TemplatesService(SeatLayerClient client) => _client = client;
+
+    /// <summary>
+    /// Instantiates a published template as a draft in the caller's workspace.
+    /// </summary>
+    /// <remarks>
+    /// The API requires a JSON object even when no overrides are needed, so this sends
+    /// <c>{}</c>. It uses the server's header-replay contract and retries with one stable
+    /// idempotency key.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<string, object?>> InstantiateTemplateAsync(
+        string templateId, CancellationToken cancellationToken = default)
+        => InstantiateTemplateAsync(templateId, new TemplateInstantiateRequest(), cancellationToken);
+
+    /// <summary>Instantiates with optional name, workspace, document, or version-pinning overrides.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> InstantiateTemplateAsync(
+        string templateId,
+        TemplateInstantiateRequest request,
+        CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            $"/v1/templates/{SeatLayerClient.Escape(templateId)}/instantiate",
+            Body.Of(
+                ("name", request.Name), ("workspaceId", request.WorkspaceId),
+                ("editedDoc", request.EditedDoc), ("version", request.Version), ("sha256", request.Sha256)),
+            request.IdempotencyKey,
+            cancellationToken);
+}
+
 /// <summary>Filters and paging for an event listing.</summary>
 public sealed class EventListRequest
 {
@@ -266,6 +316,41 @@ public sealed class EventCreateRequest
     public string? Mode { get; set; }
     /// <summary>Optional caller key for exact server replay.</summary>
     public string? IdempotencyKey { get; set; }
+}
+
+/// <summary>
+/// One input in a full ticket-release replacement. It deliberately excludes live response fields
+/// such as position, sold-out time, consumption, and remaining quota.
+/// </summary>
+public sealed class TicketReleaseInput
+{
+    /// <summary>Existing server-issued release id to preserve while replacing; omit to create one.</summary>
+    public string? Id { get; set; }
+    /// <summary>Buyer-visible release name.</summary>
+    public required string Name { get; set; }
+    /// <summary>Category key, or null/omitted for every non-tiered category.</summary>
+    public string? CategoryKey { get; set; }
+    /// <summary>Integer price in major currency units.</summary>
+    public required int Price { get; set; }
+    /// <summary>Optional prior integer price in major currency units.</summary>
+    public int? PreviousPrice { get; set; }
+    /// <summary>Optional maximum quantity; null/omitted means unlimited.</summary>
+    public int? Quota { get; set; }
+    /// <summary>Optional inclusive start timestamp in epoch milliseconds.</summary>
+    public long? StartsAt { get; set; }
+    /// <summary>Optional exclusive end timestamp in epoch milliseconds.</summary>
+    public long? EndsAt { get; set; }
+    /// <summary>Optional action: buy, apply, or invoice; defaults to buy server-side.</summary>
+    public string? Action { get; set; }
+    /// <summary>Required HTTPS destination for apply or invoice actions; omit for buy.</summary>
+    public string? ActionUrl { get; set; }
+}
+
+/// <summary>Whole-list ticket-release replacement request.</summary>
+public sealed class TicketReleaseReplaceRequest
+{
+    /// <summary>Ordered replacement inputs. The server derives dense positions from this order.</summary>
+    public required IReadOnlyList<TicketReleaseInput> Releases { get; set; }
 }
 
 /// <summary>Event lifecycle, metadata and reports.</summary>
@@ -422,6 +507,36 @@ public sealed class EventsService
         return _client.PostAsync(
             $"/v1/events/{SeatLayerClient.Escape(eventKey)}/hold-ttl", body, null, cancellationToken);
     }
+
+    /// <summary>Lists ticket releases with current quota consumption for the event.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> ListTicketReleasesAsync(
+        string eventKey, CancellationToken cancellationToken = default)
+        => _client.GetAsync($"/v1/events/{SeatLayerClient.Escape(eventKey)}/releases", null, cancellationToken);
+
+    /// <summary>
+    /// Replaces the event's complete, ordered ticket-release list.
+    /// </summary>
+    /// <remarks>
+    /// This mutation is deliberately single-attempt because the public operation has no
+    /// header-replay contract.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<string, object?>> UpdateTicketReleasesAsync(
+        string eventKey,
+        TicketReleaseReplaceRequest request,
+        CancellationToken cancellationToken = default)
+        => _client.PutAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/releases",
+            Body.Of(("releases", request.Releases)),
+            cancellationToken);
+
+    /// <summary>Ends one ticket release immediately. This mutation is intentionally single-attempt.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> CloseTicketReleaseAsync(
+        string eventKey, string releaseId, CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/releases/{SeatLayerClient.Escape(releaseId)}/close",
+            null,
+            null,
+            cancellationToken);
 
     /// <summary>Retrieves the event report.</summary>
     public Task<IReadOnlyDictionary<string, object?>> RetrieveReportAsync(

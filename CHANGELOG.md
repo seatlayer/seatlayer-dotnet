@@ -3,9 +3,13 @@
 ## Unreleased
 
 - **Security/reliability:** Mutations now default to a single attempt. Automatic header-replay
-  retries are limited to chart create/copy, event create, and workspace create, preventing
-  transient failures from duplicating holds or best-available results and from issuing extra
-  show-once credentials.
+  retries are limited to chart create/copy, template instantiation, event create, and workspace
+  create, preventing transient failures from duplicating holds or best-available results and from
+  issuing extra show-once credentials.
+
+- Added `Templates.InstantiateTemplateAsync` for materializing published catalog templates as drafts,
+  with header-replay idempotency.
+- Added typed ticket-release list, full-list replacement, and close methods to `Events`.
 
 ## 0.2.0 — 2026-08-12
 

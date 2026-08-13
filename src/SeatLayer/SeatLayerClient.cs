@@ -91,6 +91,7 @@ public sealed class SeatLayerClient : IDisposable
         Events = new EventsService(this);
         Inventory = new InventoryService(this);
         Sessions = new SessionsService(this);
+        Templates = new TemplatesService(this);
         Webhooks = new WebhooksService(this);
         Workspaces = new WorkspacesService(this);
     }
@@ -112,6 +113,9 @@ public sealed class SeatLayerClient : IDisposable
 
     /// <summary>Short-lived, origin-bound browser tokens.</summary>
     public SessionsService Sessions { get; }
+
+    /// <summary>Published catalog templates that can be materialized as chart drafts.</summary>
+    public TemplatesService Templates { get; }
 
     /// <summary>Webhook subscription management.</summary>
     public WebhooksService Webhooks { get; }
