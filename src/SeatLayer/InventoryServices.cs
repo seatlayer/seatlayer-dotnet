@@ -18,7 +18,7 @@ public sealed class BestAvailableRequest
     /// <summary>Required when booking outright, so the sale can be reconciled.</summary>
     public string? BookingRef { get; set; }
 
-    /// <summary>Makes a retried call collapse into the original.</summary>
+    /// <summary>Optional caller key forwarded to the API; it does not enable automatic retries.</summary>
     public string? IdempotencyKey { get; set; }
 
     /// <summary>Private allocation channels whose inventory this sale may use.</summary>
@@ -29,6 +29,59 @@ public sealed class BestAvailableRequest
 
     /// <summary>Audit reason for channel use or a privileged override.</summary>
     public string? Reason { get; set; }
+}
+
+/// <summary>Full public hold request, including variable-capacity selections.</summary>
+public sealed class HoldRequest
+{
+    /// <summary>Simple object labels to hold.</summary>
+    public IEnumerable<string>? Labels { get; set; }
+
+    /// <summary>Tier and quantity-aware selections.</summary>
+    public IEnumerable<IDictionary<string, object?>>? Selections { get; set; }
+
+    /// <summary>Checkout lifetime override.</summary>
+    public long? TtlMs { get; set; }
+
+    /// <summary>Active hold to atomically replace.</summary>
+    public string? ReplaceHoldId { get; set; }
+
+    /// <summary>Private channels whose inventory may be used.</summary>
+    public IEnumerable<string>? ChannelIds { get; set; }
+
+    /// <summary>Explicit privileged allocation override.</summary>
+    public bool? IgnoreChannelRestrictions { get; set; }
+
+    /// <summary>Audit reason.</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>Optional caller key; it does not enable automatic retries.</summary>
+    public string? IdempotencyKey { get; set; }
+}
+
+/// <summary>Full booking request for a hold, labels, or both.</summary>
+public sealed class BookRequest
+{
+    /// <summary>Active hold to convert into a booking.</summary>
+    public string? HoldId { get; set; }
+
+    /// <summary>Labels to book directly or alongside the hold.</summary>
+    public IEnumerable<string>? Labels { get; set; }
+
+    /// <summary>Required stable sale reference.</summary>
+    public required string BookingRef { get; set; }
+
+    /// <summary>Private channels whose inventory may be used.</summary>
+    public IEnumerable<string>? ChannelIds { get; set; }
+
+    /// <summary>Explicit privileged allocation override.</summary>
+    public bool? IgnoreChannelRestrictions { get; set; }
+
+    /// <summary>Audit reason.</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>Optional caller key; it does not enable automatic retries.</summary>
+    public string? IdempotencyKey { get; set; }
 }
 
 /// <summary>Filters and paging for booking lifecycle records.</summary>
@@ -97,6 +150,22 @@ public sealed class InventoryService
             idempotencyKey,
             cancellationToken);
 
+    /// <summary>Reserves labels or tier/quantity-aware selections.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> HoldAsync(
+        string eventKey, HoldRequest request, CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            Path(eventKey, "/hold"),
+            Body.Of(
+                ("labels", request.Labels?.ToList()),
+                ("selections", request.Selections?.ToList()),
+                ("ttlMs", request.TtlMs),
+                ("replaceHoldId", request.ReplaceHoldId),
+                ("channelIds", request.ChannelIds?.ToList()),
+                ("ignoreChannelRestrictions", request.IgnoreChannelRestrictions),
+                ("reason", request.Reason)),
+            request.IdempotencyKey,
+            cancellationToken);
+
     /// <summary>
     /// Picks the best free objects and holds them.
     /// </summary>
@@ -158,10 +227,15 @@ public sealed class InventoryService
     /// its renewal cap answers 409 <c>cannot_extend</c>.
     /// </remarks>
     public Task<IReadOnlyDictionary<string, object?>> ExtendHoldAsync(
-        string eventKey, string holdId, long? ttlMs = null, CancellationToken cancellationToken = default)
+        string eventKey, string holdId, long? ttlMs = null, CancellationToken cancellationToken = default,
+        IEnumerable<string>? channelIds = null,
+        bool? ignoreChannelRestrictions = null,
+        string? reason = null)
         => _client.PostAsync(
             Path(eventKey, "/extend"),
-            Body.Of(("holdId", holdId), ("ttlMs", ttlMs)),
+            Body.Of(
+                ("holdId", holdId), ("ttlMs", ttlMs), ("channelIds", channelIds?.ToList()),
+                ("ignoreChannelRestrictions", ignoreChannelRestrictions), ("reason", reason)),
             null,
             cancellationToken);
 
@@ -195,6 +269,20 @@ public sealed class InventoryService
                 ("channelIds", channelIds?.ToList()),
                 ("ignoreChannelRestrictions", ignoreChannelRestrictions), ("reason", reason)),
             idempotencyKey,
+            cancellationToken);
+
+    /// <summary>Books a hold, labels, or both using the complete public request.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> BookAsync(
+        string eventKey, BookRequest request, CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            Path(eventKey, "/book"),
+            Body.Of(
+                ("holdId", request.HoldId), ("labels", request.Labels?.ToList()),
+                ("bookingRef", NormalizeBookingRef(request.BookingRef)),
+                ("channelIds", request.ChannelIds?.ToList()),
+                ("ignoreChannelRestrictions", request.IgnoreChannelRestrictions),
+                ("reason", request.Reason)),
+            request.IdempotencyKey,
             cancellationToken);
 
     /// <summary>Books labels outright, with no prior hold.</summary>
@@ -235,9 +323,13 @@ public sealed class InventoryService
 
     /// <summary>Holds inventory back from sale (house seats, production holds).</summary>
     public Task<IReadOnlyDictionary<string, object?>> BlockAsync(
-        string eventKey, IEnumerable<string> labels, CancellationToken cancellationToken = default)
+        string eventKey, IEnumerable<string> labels, CancellationToken cancellationToken = default,
+        long? releaseAt = null)
         => _client.PostAsync(
-            Path(eventKey, "/block"), Body.Of(("labels", labels.ToList())), null, cancellationToken);
+            Path(eventKey, "/block"),
+            Body.Of(("labels", labels.ToList()), ("releaseAt", releaseAt)),
+            null,
+            cancellationToken);
 
     /// <summary>Returns blocked objects to sale.</summary>
     public Task<IReadOnlyDictionary<string, object?>> UnblockAsync(
@@ -257,8 +349,9 @@ public sealed class InventoryService
 
     /// <summary>Replaces per-object availability rules.</summary>
     public Task<IReadOnlyDictionary<string, object?>> UpdateAvailabilityAsync(
-        string eventKey, IDictionary<string, object?> fields, CancellationToken cancellationToken = default)
-        => _client.PostAsync(Path(eventKey, "/availability"), fields, null, cancellationToken);
+        string eventKey, IDictionary<string, object?> rules, CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            Path(eventKey, "/availability"), Body.Of(("rules", rules)), null, cancellationToken);
 
     /// <summary>Lists one page of booking lifecycle records, newest first.</summary>
     public Task<IReadOnlyDictionary<string, object?>> ListBookingsAsync(
@@ -292,6 +385,37 @@ public sealed class InventoryService
     }
 }
 
+/// <summary>Full authority and feature request for a designer session.</summary>
+public sealed class DesignerSessionRequest
+{
+    /// <summary>Workspace containing the chart.</summary>
+    public required string WorkspaceId { get; set; }
+
+    /// <summary>Chart to open.</summary>
+    public required string ChartId { get; set; }
+
+    /// <summary>Exact browser origin allowed to consume the token.</summary>
+    public required string AllowedOrigin { get; set; }
+
+    /// <summary>read-only, edit, or publish.</summary>
+    public string? Authority { get; set; }
+
+    /// <summary>Legacy publication flag, reconciled by the server with Authority.</summary>
+    public bool? CanPublish { get; set; }
+
+    /// <summary>normal or safe.</summary>
+    public string? Mode { get; set; }
+
+    /// <summary>Safe-mode editing restrictions.</summary>
+    public IDictionary<string, bool>? SafeModeOptions { get; set; }
+
+    /// <summary>Requested feature policy inputs.</summary>
+    public IDictionary<string, object?>? Features { get; set; }
+
+    /// <summary>Requested lifetime from 300 to 14,400 seconds.</summary>
+    public int? ExpiresInSeconds { get; set; }
+}
+
 /// <summary>
 /// Short-lived, origin-bound browser tokens.
 /// </summary>
@@ -313,6 +437,23 @@ public sealed class SessionsService
     /// <summary>Capability granting access to reports and the audit log.</summary>
     public const string CapabilityReports = "event:reports";
 
+    /// <summary>Capability granting read-only channel visibility.</summary>
+    public const string CapabilityChannelsView = "event:channels:view";
+    /// <summary>Capability granting channel administration.</summary>
+    public const string CapabilityChannelsManage = "event:channels:manage";
+    /// <summary>Capability granting order reads.</summary>
+    public const string CapabilityOrdersRead = "event:orders:read";
+    /// <summary>Capability granting refunds.</summary>
+    public const string CapabilityRefund = "event:refund";
+    /// <summary>Capability granting ticket delivery.</summary>
+    public const string CapabilityTicketsSend = "event:tickets:send";
+    /// <summary>Capability granting door reads.</summary>
+    public const string CapabilityDoorView = "event:door:view";
+    /// <summary>Capability granting check-in writes.</summary>
+    public const string CapabilityDoorCheckin = "event:door:checkin";
+    /// <summary>Capability granting box-office actions.</summary>
+    public const string CapabilityBoxOffice = "event:boxoffice";
+
     private readonly SeatLayerClient _client;
 
     internal SessionsService(SeatLayerClient client) => _client = client;
@@ -321,10 +462,9 @@ public sealed class SessionsService
     /// Mints a manage-session token for the control room.
     /// </summary>
     /// <remarks>
-    /// <paramref name="capabilities"/> is required here even though the API defaults it.
-    /// That default grants all four — including <c>event:cancel</c>, which un-books paid
-    /// inventory. Granting the ability to reverse sales by forgetting an argument is not a
-    /// default worth inheriting.
+    /// <paramref name="capabilities"/> is required here even though the API defaults
+    /// omission to <c>event:view</c>. Making the grant explicit keeps browser authority
+    /// reviewable and prevents future server defaults from changing client intent.
     /// </remarks>
     /// <exception cref="ArgumentException">No capabilities were supplied.</exception>
     public Task<IReadOnlyDictionary<string, object?>> CreateManageSessionAsync(
@@ -332,15 +472,15 @@ public sealed class SessionsService
         string allowedOrigin,
         IEnumerable<string> capabilities,
         int? expiresInSeconds = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? workspaceId = null)
     {
         var granted = capabilities?.ToList() ?? new List<string>();
         if (granted.Count == 0)
         {
             throw new ArgumentException(
-                "capabilities is required: pass the smallest set the page needs, e.g. "
-                + "[SessionsService.CapabilityView]. Omitting it server-side grants "
-                + "event:cancel, which can reverse paid bookings.",
+                "capabilities is required: pass the smallest explicit set the page needs, e.g. "
+                + "[SessionsService.CapabilityView].",
                 nameof(capabilities));
         }
 
@@ -348,7 +488,7 @@ public sealed class SessionsService
             $"/v1/events/{SeatLayerClient.Escape(eventKey)}/manage-sessions",
             Body.Of(
                 ("allowedOrigin", allowedOrigin), ("capabilities", granted),
-                ("expiresInSeconds", expiresInSeconds)),
+                ("expiresInSeconds", expiresInSeconds), ("workspaceId", workspaceId)),
             null,
             cancellationToken);
     }
@@ -377,6 +517,20 @@ public sealed class SessionsService
             Body.Of(
                 ("workspaceId", workspaceId), ("chartId", chartId), ("allowedOrigin", allowedOrigin),
                 ("authority", authority), ("mode", mode), ("expiresInSeconds", expiresInSeconds)),
+            null,
+            cancellationToken);
+
+    /// <summary>Mints a designer token with the complete safe-mode and feature request.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> CreateDesignerSessionAsync(
+        DesignerSessionRequest request, CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            "/v1/designer/sessions",
+            Body.Of(
+                ("workspaceId", request.WorkspaceId), ("chartId", request.ChartId),
+                ("allowedOrigin", request.AllowedOrigin), ("authority", request.Authority),
+                ("canPublish", request.CanPublish), ("mode", request.Mode),
+                ("safeModeOptions", request.SafeModeOptions), ("features", request.Features),
+                ("expiresInSeconds", request.ExpiresInSeconds)),
             null,
             cancellationToken);
 
@@ -419,6 +573,23 @@ public sealed class WebhooksService
         string webhookId, CancellationToken cancellationToken = default)
         => _client.GetAsync(
             $"/v1/webhooks/{SeatLayerClient.Escape(webhookId)}/deliveries", null, cancellationToken);
+
+    /// <summary>Lists recent delivery attempts with public status and time filters.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> ListDeliveriesAsync(
+        string webhookId,
+        int? limit,
+        string? status,
+        long? before,
+        CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            $"/v1/webhooks/{SeatLayerClient.Escape(webhookId)}/deliveries",
+            new Dictionary<string, string?>
+            {
+                ["limit"] = limit?.ToString(),
+                ["status"] = status,
+                ["before"] = before?.ToString(),
+            },
+            cancellationToken);
 }
 
 /// <summary>Workspaces isolate one tenant's charts and events from another's.</summary>
@@ -436,7 +607,7 @@ public sealed class WorkspacesService
     public Task<IReadOnlyDictionary<string, object?>> CreateAsync(
         string name, string? externalRef = null, string? idempotencyKey = null,
         CancellationToken cancellationToken = default)
-        => _client.PostAsync(
+        => _client.PostHeaderReplayAsync(
             "/v1/workspaces", Body.Of(("name", name), ("externalRef", externalRef)),
             idempotencyKey, cancellationToken);
 

@@ -6,6 +6,12 @@ using System.Web;
 
 namespace SeatLayer;
 
+internal enum MutationRetryPolicy
+{
+    None,
+    HeaderReplay,
+}
+
 /// <summary>
 /// The SeatLayer server API client.
 /// </summary>
@@ -29,6 +35,8 @@ namespace SeatLayer;
 /// </remarks>
 public sealed class SeatLayerClient : IDisposable
 {
+    private sealed record BinaryPayload(byte[] Bytes, string ContentType);
+
     /// <summary>The public API.</summary>
     public const string DefaultBaseUrl = "https://api.seatlayer.io";
 
@@ -115,17 +123,37 @@ public sealed class SeatLayerClient : IDisposable
     public Task<IReadOnlyDictionary<string, object?>> ReadyAsync(CancellationToken cancellationToken = default)
         => SendAsync(HttpMethod.Get, "/health/ready", cancellationToken: cancellationToken);
 
+    /// <summary>Dependency-aware readiness probe with the Durable Object check enabled on demand.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> ReadyAsync(
+        bool deep, CancellationToken cancellationToken = default)
+        => SendAsync(
+            HttpMethod.Get,
+            "/health/ready",
+            deep ? new Dictionary<string, string?> { ["deep"] = "1" } : null,
+            cancellationToken: cancellationToken);
+
     /// <summary>
-    /// Escape hatch for surface this SDK does not wrap yet. Carries the same auth,
-    /// retries, idempotency and error mapping.
+    /// Escape hatch for surface this SDK does not wrap yet. Reads retain retries;
+    /// raw mutations are single-attempt because their replay contract is unknown.
     /// </summary>
-    public async Task<IReadOnlyDictionary<string, object?>> SendAsync(
+    public Task<IReadOnlyDictionary<string, object?>> SendAsync(
         HttpMethod method,
         string path,
         IDictionary<string, string?>? query = null,
         object? body = null,
         string? idempotencyKey = null,
         CancellationToken cancellationToken = default)
+        => SendCoreAsync(
+            method, path, query, body, idempotencyKey, MutationRetryPolicy.None, cancellationToken);
+
+    private async Task<IReadOnlyDictionary<string, object?>> SendCoreAsync(
+        HttpMethod method,
+        string path,
+        IDictionary<string, string?>? query,
+        object? body,
+        string? idempotencyKey,
+        MutationRetryPolicy retryPolicy,
+        CancellationToken cancellationToken)
     {
         var url = _baseUrl + path;
         if (query is not null)
@@ -147,17 +175,30 @@ public sealed class SeatLayerClient : IDisposable
             url += builder.ToString();
         }
 
-        var payload = body is null ? null : JsonSerializer.Serialize(body, JsonOptions);
+        var binaryPayload = body as BinaryPayload;
+        var payload = body is null || binaryPayload is not null
+            ? null
+            : JsonSerializer.Serialize(body, JsonOptions);
 
-        // Every mutation carries one. A retried POST that creates a second hold is worse
-        // than a failed POST, and the caller cannot tell from outside — so the SDK, which
-        // knows it retried, is the right place to guarantee it.
+        // Only operations with exact server-side response replay get an automatic key.
+        // A caller key on any other mutation is forwarded, but cannot opt that operation
+        // into automatic retries.
         string? resolvedKey = null;
         if (method != HttpMethod.Get && method != HttpMethod.Head)
         {
-            resolvedKey = idempotencyKey ?? Guid.NewGuid().ToString();
-            IdempotencyKey.Validate(resolvedKey);
+            resolvedKey = idempotencyKey;
+            if (resolvedKey is null && retryPolicy == MutationRetryPolicy.HeaderReplay)
+            {
+                resolvedKey = Guid.NewGuid().ToString();
+            }
+
+            if (resolvedKey is not null)
+            {
+                IdempotencyKey.Validate(resolvedKey);
+            }
         }
+        var retryAllowed = method == HttpMethod.Get || method == HttpMethod.Head
+            || retryPolicy == MutationRetryPolicy.HeaderReplay;
 
         Exception? lastError = null;
 
@@ -172,7 +213,12 @@ public sealed class SeatLayerClient : IDisposable
                 request.Headers.Add("Idempotency-Key", resolvedKey);
             }
 
-            if (payload is not null)
+            if (binaryPayload is not null)
+            {
+                request.Content = new ByteArrayContent(binaryPayload.Bytes);
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue(binaryPayload.ContentType);
+            }
+            else if (payload is not null)
             {
                 request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
             }
@@ -192,7 +238,7 @@ public sealed class SeatLayerClient : IDisposable
                 lastError = new SeatLayerConnectionException(
                     $"Request to {method} {path} failed: {error.Message}", error);
 
-                if (attempt < _maxRetries - 1)
+                if (retryAllowed && attempt < _maxRetries - 1)
                 {
                     await DelayAsync(Backoff(attempt, null), cancellationToken).ConfigureAwait(false);
                     continue;
@@ -221,7 +267,7 @@ public sealed class SeatLayerClient : IDisposable
                 var retryAfter = ParseRetryAfter(response, errorBody);
                 var status = (int)response.StatusCode;
 
-                if (IsRetryable(status) && attempt < _maxRetries - 1)
+                if (retryAllowed && IsRetryable(status) && attempt < _maxRetries - 1)
                 {
                     var wait = status == 429 ? TimeSpan.FromSeconds(retryAfter) : Backoff(attempt, null);
                     await DelayAsync(wait, cancellationToken).ConfigureAwait(false);
@@ -244,9 +290,30 @@ public sealed class SeatLayerClient : IDisposable
         CancellationToken cancellationToken = default)
         => SendAsync(HttpMethod.Post, path, null, body, idempotencyKey, cancellationToken);
 
+    internal Task<IReadOnlyDictionary<string, object?>> PostHeaderReplayAsync(
+        string path, object? body = null, string? idempotencyKey = null,
+        CancellationToken cancellationToken = default)
+        => SendCoreAsync(
+            HttpMethod.Post, path, null, body, idempotencyKey,
+            MutationRetryPolicy.HeaderReplay, cancellationToken);
+
     internal Task<IReadOnlyDictionary<string, object?>> PutAsync(
         string path, object body, CancellationToken cancellationToken = default)
         => SendAsync(HttpMethod.Put, path, null, body, cancellationToken: cancellationToken);
+
+    internal Task<IReadOnlyDictionary<string, object?>> PutBinaryAsync(
+        string path, byte[] bytes, string contentType, CancellationToken cancellationToken = default)
+    {
+        var allowed = new[] { "image/png", "image/jpeg", "image/webp", "application/octet-stream" };
+        if (!allowed.Contains(contentType, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"Unsupported poster content type: {contentType}", nameof(contentType));
+        }
+
+        return SendAsync(
+            HttpMethod.Put, path, body: new BinaryPayload(bytes.ToArray(), contentType),
+            cancellationToken: cancellationToken);
+    }
 
     internal Task<IReadOnlyDictionary<string, object?>> PatchAsync(
         string path, object body, CancellationToken cancellationToken = default)
@@ -255,6 +322,10 @@ public sealed class SeatLayerClient : IDisposable
     internal Task<IReadOnlyDictionary<string, object?>> DeleteAsync(
         string path, CancellationToken cancellationToken = default)
         => SendAsync(HttpMethod.Delete, path, cancellationToken: cancellationToken);
+
+    internal Task<IReadOnlyDictionary<string, object?>> DeleteAsync(
+        string path, IDictionary<string, string?> query, CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Delete, path, query, cancellationToken: cancellationToken);
 
     /// <summary>Percent-encodes a path segment, including slashes.</summary>
     internal static string Escape(string segment) => Uri.EscapeDataString(segment);

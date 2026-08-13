@@ -21,7 +21,7 @@ public sealed class CreateChannelRequest
     /// <summary>Audit reason for the change.</summary>
     public string? Reason { get; set; }
 
-    /// <summary>Collapses retried creation into the original mutation.</summary>
+    /// <summary>Optional caller key forwarded to the API; it does not enable automatic retries.</summary>
     public string? IdempotencyKey { get; set; }
 }
 
@@ -68,21 +68,34 @@ public sealed class BuyerAccessSessionRequest
     /// <summary>Caller-generated request correlation id.</summary>
     public string? ClientRequestId { get; set; }
 
-    /// <summary>Collapses retried creation into the original mutation.</summary>
+    /// <summary>Optional caller key forwarded to the API; it does not enable automatic retries.</summary>
     public string? IdempotencyKey { get; set; }
 }
 
-/// <summary>Filters and paging for buyer access sessions.</summary>
+/// <summary>Limit for the latest buyer access sessions.</summary>
 public sealed class BuyerAccessSessionListRequest
 {
-    /// <summary>Restricts results to one state.</summary>
-    public string? State { get; set; }
-
     /// <summary>Page size.</summary>
     public int? Limit { get; set; }
+}
 
-    /// <summary>Continues a previous page.</summary>
-    public string? Cursor { get; set; }
+/// <summary>Options for minting a one-time-revealed hosted channel access link.</summary>
+public sealed class AccessLinkCreateRequest
+{
+    /// <summary>Operator-facing label.</summary>
+    public string? Label { get; set; }
+    /// <summary>Whether public inventory is visible too.</summary>
+    public bool? IncludePublic { get; set; }
+    /// <summary>Absolute expiry epoch milliseconds.</summary>
+    public long? ExpiresAt { get; set; }
+    /// <summary>Maximum successful redemptions.</summary>
+    public int? MaxRedemptions { get; set; }
+    /// <summary>Maximum quantity per redeemed session.</summary>
+    public int? MaxQuantity { get; set; }
+    /// <summary>Lifetime of a redeemed buyer session.</summary>
+    public int? SessionTtlSeconds { get; set; }
+    /// <summary>Audit reason.</summary>
+    public string? Reason { get; set; }
 }
 
 /// <summary>Private allocations, reporting, and origin-bound buyer access.</summary>
@@ -171,7 +184,7 @@ public sealed class ChannelsService
             new Dictionary<string, string?>
             {
                 ["channelIds"] = channelIds is null ? null : string.Join(",", channelIds),
-                ["includePublic"] = includePublic is null ? null : includePublic.Value ? "1" : "0",
+                ["includePublic"] = includePublic == true ? "1" : null,
             },
             cancellationToken);
 
@@ -200,14 +213,18 @@ public sealed class ChannelsService
     public Task<IReadOnlyDictionary<string, object?>> ArchiveAsync(
         string eventKey,
         string channelId,
-        string destination,
+        string? destination,
         string? reason = null,
         CancellationToken cancellationToken = default)
-        => _client.PostAsync(
+    {
+        var body = Body.Of(("reason", reason));
+        body["destination"] = destination;
+        return _client.PostAsync(
             Path(eventKey, $"/{SeatLayerClient.Escape(channelId)}/archive"),
-            Body.Of(("destination", destination), ("reason", reason)),
+            body,
             null,
             cancellationToken);
+    }
 
     /// <summary>Mints a short-lived, origin-bound buyer access token.</summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateBuyerAccessSessionAsync(
@@ -235,9 +252,7 @@ public sealed class ChannelsService
             $"/v1/events/{SeatLayerClient.Escape(eventKey)}/buyer-access-sessions",
             new Dictionary<string, string?>
             {
-                ["state"] = request.State,
                 ["limit"] = request.Limit?.ToString(),
-                ["cursor"] = request.Cursor,
             },
             cancellationToken);
     }
@@ -249,4 +264,62 @@ public sealed class ChannelsService
             $"/v1/events/{SeatLayerClient.Escape(eventKey)}/buyer-access-sessions/"
             + SeatLayerClient.Escape(sessionId),
             cancellationToken);
+
+    /// <summary>Mints a hosted access link; its capability is revealed once.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> CreateAccessLinkAsync(
+        string eventKey,
+        string channelId,
+        AccessLinkCreateRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        request ??= new AccessLinkCreateRequest();
+        return _client.PostAsync(
+            AccessLinkPath(eventKey, channelId),
+            Body.Of(
+                ("label", request.Label), ("includePublic", request.IncludePublic),
+                ("expiresAt", request.ExpiresAt), ("maxRedemptions", request.MaxRedemptions),
+                ("maxQuantity", request.MaxQuantity),
+                ("sessionTtlSeconds", request.SessionTtlSeconds), ("reason", request.Reason)),
+            null,
+            cancellationToken);
+    }
+
+    /// <summary>Lists link status without re-revealing capabilities.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> ListAccessLinksAsync(
+        string eventKey, string channelId, CancellationToken cancellationToken = default)
+        => _client.GetAsync(AccessLinkPath(eventKey, channelId), null, cancellationToken);
+
+    /// <summary>Rotates a hosted link and reveals the replacement once.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> RotateAccessLinkAsync(
+        string eventKey,
+        string channelId,
+        string linkId,
+        bool endActiveSessions,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            AccessLinkPath(eventKey, channelId, $"/{SeatLayerClient.Escape(linkId)}/rotate"),
+            Body.Of(("endActiveSessions", endActiveSessions), ("reason", reason)),
+            null,
+            cancellationToken);
+
+    /// <summary>Revokes a hosted link and optionally ends sessions it minted.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> RevokeAccessLinkAsync(
+        string eventKey,
+        string channelId,
+        string linkId,
+        bool endActiveSessions = false,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+        => _client.DeleteAsync(
+            AccessLinkPath(eventKey, channelId, $"/{SeatLayerClient.Escape(linkId)}"),
+            new Dictionary<string, string?>
+            {
+                ["endActiveSessions"] = endActiveSessions ? "1" : null,
+                ["reason"] = reason,
+            },
+            cancellationToken);
+
+    private static string AccessLinkPath(string eventKey, string channelId, string suffix = "")
+        => Path(eventKey, $"/{SeatLayerClient.Escape(channelId)}/access-links{suffix}");
 }

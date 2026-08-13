@@ -262,12 +262,18 @@ support requests.
 
 ## Reliability
 
-**Retries.** 429, 408 and 5xx are retried with exponential backoff and full jitter; `Retry-After`
-wins when the server sends it. 4xx is never retried — it will not start succeeding. A cancelled
+**Retries.** Reads (`GET`/`HEAD`) retry 429, 408 and 5xx with exponential backoff and full jitter;
+`Retry-After` wins when the server sends it. Automatic mutation retries are limited to the four
+operations backed by exact response replay: `Charts.CreateAsync`, `Charts.CopyAsync`,
+`Events.CreateAsync`, and `Workspaces.CreateAsync`. Other 4xx responses are never retried. A cancelled
 `CancellationToken` stops the loop immediately rather than being treated as a transient fault.
 
-**Idempotency.** Every mutating request carries an `Idempotency-Key`, generated if you do not supply
-one, and **reused across retries** so a retried booking cannot become two bookings.
+**Idempotency.** Those four replay-backed operations carry an `Idempotency-Key`, generated when you
+do not supply one and reused across attempts. Other mutations are single-attempt and receive no
+automatic key. A caller-supplied key is forwarded but does not enable retries. This includes
+inventory holds and bookings, show-once credential or secret creation, unsupported operations, and
+raw `SendAsync` mutations. Keep the booking reference in the booking body for reconciliation, but
+handle an unknown network outcome explicitly instead of automatically repeating the sale.
 
 ```csharp
 new SeatLayerClient(secretKey, new SeatLayerClientOptions
@@ -279,7 +285,8 @@ new SeatLayerClient(secretKey, new SeatLayerClientOptions
 
 ## Escape hatch
 
-For surface this SDK does not wrap yet — same auth, retries, idempotency and error mapping:
+For surface this SDK does not wrap yet, `SendAsync` keeps auth and error mapping. Raw reads retain
+the read retry policy; raw mutations are always single-attempt because their replay contract is unknown:
 
 ```csharp
 await client.SendAsync(HttpMethod.Post, "/v1/events/ev_1/some-new-route",

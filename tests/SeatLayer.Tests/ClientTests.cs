@@ -19,7 +19,12 @@ internal sealed class StubHandler : HttpMessageHandler
         IEnumerable<(HttpStatusCode Status, string Body, IDictionary<string, string> Headers)> responses)
         => _responses = new Queue<(HttpStatusCode, string, IDictionary<string, string>)>(responses);
 
-    internal List<(HttpMethod Method, Uri Url, HttpRequestHeaders Headers, string? Body)> Calls { get; } = new();
+    internal List<(
+        HttpMethod Method,
+        Uri Url,
+        HttpRequestHeaders Headers,
+        string? Body,
+        string? ContentType)> Calls { get; } = new();
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
@@ -28,7 +33,12 @@ internal sealed class StubHandler : HttpMessageHandler
             ? null
             : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
-        Calls.Add((request.Method, request.RequestUri!, request.Headers, body));
+        Calls.Add((
+            request.Method,
+            request.RequestUri!,
+            request.Headers,
+            body,
+            request.Content?.Headers.ContentType?.MediaType));
 
         Assert.True(_responses.Count > 0, "more requests than queued responses");
         var (status, content, headers) = _responses.Dequeue();
@@ -115,15 +125,22 @@ public class ClientTests
     }
 
     [Fact]
-    public async Task AttachesIdempotencyKeyToMutationsOnly()
+    public async Task OnlyGeneratesIdempotencyKeyForHeaderReplayMutations()
     {
-        var (client, handler) = Build(new[] { Ok("{\"events\":[]}"), Status(HttpStatusCode.Created, "{}") });
+        var (client, handler) = Build(new[]
+        {
+            Ok("{\"events\":[]}"),
+            Status(HttpStatusCode.Created, "{}"),
+            Status(HttpStatusCode.Created, "{}"),
+        });
 
         await client.Events.ListAsync();
         await client.Events.CreateAsync("c_1");
+        await client.Inventory.HoldAsync("ev_1", new[] { "A-1" });
 
         Assert.False(handler.Calls[0].Headers.Contains("Idempotency-Key"));
         Assert.True(handler.Calls[1].Headers.Contains("Idempotency-Key"));
+        Assert.False(handler.Calls[2].Headers.Contains("Idempotency-Key"));
     }
 
     [Fact]
@@ -232,6 +249,28 @@ public class ClientTests
     }
 
     [Fact]
+    public async Task StableErrorContractPrefersCodeAndPreservesEvidence()
+    {
+        var (client, _) = Build(
+            new[]
+            {
+                Status(
+                    HttpStatusCode.UnprocessableEntity,
+                    "{\"error\":\"validation_failed\",\"code\":\"invalid_expiry\",\"field\":\"expiresAt\"}",
+                    new Dictionary<string, string> { ["X-Request-ID"] = "req_contract" }),
+            },
+            maxRetries: 1);
+
+        var error = await Assert.ThrowsAsync<SeatLayerValidationException>(
+            () => client.Channels.CreateAccessLinkAsync(
+                "ev_1", "ch_1", new AccessLinkCreateRequest { ExpiresAt = 1 }));
+        Assert.Equal(422, error.Status);
+        Assert.Equal("invalid_expiry", error.Code);
+        Assert.Equal("expiresAt", error.Body["field"]);
+        Assert.Equal("req_contract", error.RequestId);
+    }
+
+    [Fact]
     public async Task SurvivesNonJsonErrorBody()
     {
         // A proxy or WAF can answer with HTML; that must not become a parse crash that
@@ -246,22 +285,79 @@ public class ClientTests
     // ---------- retry ----------
 
     [Fact]
-    public async Task Retries429AndReusesIdempotencyKey()
+    public async Task HeaderReplayMutationsRetry429AndReuseIdempotencyKey()
+    {
+        var operations = new (string Name, Func<SeatLayerClient, Task> Run)[]
+        {
+            ("create chart", async client => await client.Charts.CreateAsync("Main")),
+            ("copy chart", async client => await client.Charts.CopyAsync("c_1")),
+            ("create event", async client => await client.Events.CreateAsync("c_1")),
+            ("create workspace", async client => await client.Workspaces.CreateAsync("Tenant")),
+        };
+
+        foreach (var operation in operations)
+        {
+            var (client, handler) = Build(new[]
+            {
+                Status((HttpStatusCode)429, "{\"error\":\"rate_limited\"}",
+                    new Dictionary<string, string> { ["Retry-After"] = "0" }),
+                Status(HttpStatusCode.Created, "{\"ok\":true}"),
+            });
+
+            await operation.Run(client);
+
+            Assert.True(handler.Calls.Count == 2, operation.Name);
+            Assert.Equal(
+                handler.Calls[0].Headers.GetValues("Idempotency-Key").Single(),
+                handler.Calls[1].Headers.GetValues("Idempotency-Key").Single());
+        }
+    }
+
+    [Fact]
+    public async Task BookingWithCallerKeyRemainsSingleAttempt()
     {
         var (client, handler) = Build(new[]
         {
             Status((HttpStatusCode)429, "{\"error\":\"rate_limited\"}",
                 new Dictionary<string, string> { ["Retry-After"] = "0" }),
-            Status(HttpStatusCode.Created, "{\"ok\":true}"),
         });
 
-        await client.Events.CreateAsync("c_1");
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(
+            () => client.Inventory.BookLabelsAsync(
+                "ev_1", new[] { "A-1" }, "order-42", idempotencyKey: "request-42"));
+
+        Assert.Single(handler.Calls);
+        Assert.Equal("request-42", handler.Calls[0].Headers.GetValues("Idempotency-Key").Single());
+    }
+
+    [Fact]
+    public async Task RawMutationIsFailClosedForRetries()
+    {
+        var (client, handler) = Build(new[]
+        {
+            Status((HttpStatusCode)429, "{\"error\":\"rate_limited\"}",
+                new Dictionary<string, string> { ["Retry-After"] = "0" }),
+        });
+
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(
+            () => client.SendAsync(
+                HttpMethod.Post, "/v1/events", body: new { chartId = "c_1" }, idempotencyKey: "raw-42"));
+
+        Assert.Single(handler.Calls);
+    }
+
+    [Fact]
+    public async Task ReadRetriesTransientFailure()
+    {
+        var (client, handler) = Build(new[]
+        {
+            Status((HttpStatusCode)429, "{}", new Dictionary<string, string> { ["Retry-After"] = "0" }),
+            Ok("{\"meta\":{\"key\":\"ev_1\"}}"),
+        });
+
+        await client.Events.RetrieveAsync("ev_1");
 
         Assert.Equal(2, handler.Calls.Count);
-        // Same key on the retry, or the server would create two events.
-        Assert.Equal(
-            handler.Calls[0].Headers.GetValues("Idempotency-Key").Single(),
-            handler.Calls[1].Headers.GetValues("Idempotency-Key").Single());
     }
 
     [Fact]
@@ -367,8 +463,8 @@ public class ClientTests
     public async Task ManageSessionRequiresCapabilities()
     {
         var (client, _) = Build(Array.Empty<(HttpStatusCode, string, IDictionary<string, string>)>());
-        // The API would default this to all four including event:cancel — the ability to
-        // reverse paid bookings should never arrive by omission.
+        // The API defaults omission to view-only, but the SDK requires an explicit grant
+        // so browser authority stays reviewable at the call site.
         var error = await Assert.ThrowsAsync<ArgumentException>(
             () => client.Sessions.CreateManageSessionAsync("ev_1", "https://box.example", Array.Empty<string>()));
         Assert.Contains("capabilities is required", error.Message);
@@ -431,6 +527,102 @@ public class ClientTests
         Assert.Equal("ch_partner", body.RootElement.GetProperty("channelIds")[0].GetString());
         Assert.False(body.RootElement.GetProperty("ignoreChannelRestrictions").GetBoolean());
         Assert.Equal("partner checkout", body.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task ExtendedInventoryContractsAreSentExactly()
+    {
+        var (client, handler) = Build(new[]
+        {
+            Ok("{\"ok\":true}"),
+            Ok("{\"ok\":true}"),
+            Ok("{\"ok\":true,\"holdTtlMs\":null}"),
+        });
+
+        await client.Inventory.ExtendHoldAsync(
+            "ev_1", "h_1",
+            channelIds: new[] { "ch_partner" },
+            ignoreChannelRestrictions: true,
+            reason: "staff override");
+        await client.Inventory.BlockAsync("ev_1", new[] { "A-1" }, releaseAt: 1_800_000_000_000);
+        await client.Events.UpdateHoldTtlAsync("ev_1", null);
+
+        using var extend = JsonDocument.Parse(handler.Calls[0].Body!);
+        Assert.Equal("ch_partner", extend.RootElement.GetProperty("channelIds")[0].GetString());
+        Assert.True(extend.RootElement.GetProperty("ignoreChannelRestrictions").GetBoolean());
+        using var block = JsonDocument.Parse(handler.Calls[1].Body!);
+        Assert.Equal(1_800_000_000_000, block.RootElement.GetProperty("releaseAt").GetInt64());
+        using var ttl = JsonDocument.Parse(handler.Calls[2].Body!);
+        Assert.Equal(JsonValueKind.Null, ttl.RootElement.GetProperty("holdTtlMs").ValueKind);
+    }
+
+    [Fact]
+    public async Task ExtendedPublicRequestContractsMatchTheServer()
+    {
+        var (client, handler) = Build(new[]
+        {
+            Status(HttpStatusCode.Created, "{\"meta\":{}}"),
+            Ok("{\"ok\":true,\"updated\":true,\"meta\":{}}"),
+            Ok("{\"meta\":{}}"),
+            Status(HttpStatusCode.Created, "{\"link\":{},\"capability\":\"x\"}"),
+            Status(HttpStatusCode.Created, "{\"session\":{\"id\":\"dse_1\"}}"),
+            Ok("{\"deliveries\":[]}"),
+            Ok("{\"sessions\":[]}"),
+            Ok("{\"ok\":true,\"channel\":{}}"),
+        });
+
+        await client.Events.CreateAsync(new EventCreateRequest
+        {
+            ChartId = "c_1",
+            Description = "Gala",
+            EndsAt = 1_800_000_000_000,
+            Timezone = "Europe/London",
+            Locale = "en-GB",
+            Mode = "test",
+        });
+        await client.Events.UpdateChartAsync("ev_1", true, "accept allocation drop");
+        await client.Events.UpdatePosterAsync("ev_1", new byte[] { 0x89, 0x50, 0x4e, 0x47 }, "image/png");
+        var linkResult = await client.Channels.CreateAccessLinkAsync(
+            "ev/1", "ch/1", new AccessLinkCreateRequest
+            {
+                Label = "Partner",
+                IncludePublic = false,
+                MaxRedemptions = 50,
+                SessionTtlSeconds = 900,
+            });
+        var designerResult = await client.Sessions.CreateDesignerSessionAsync(new DesignerSessionRequest
+        {
+            WorkspaceId = "ws_1",
+            ChartId = "c_1",
+            AllowedOrigin = "https://designer.example",
+            Authority = "publish",
+            CanPublish = true,
+            Mode = "safe",
+            SafeModeOptions = new Dictionary<string, bool> { ["allowDeletingObjects"] = false },
+            Features = new Dictionary<string, object?> { ["tables"] = true },
+        });
+        await client.Webhooks.ListDeliveriesAsync("wh_1", 25, "failed", 1_800_000_000_000);
+        await client.Channels.ListBuyerAccessSessionsAsync(
+            "ev_1", new BuyerAccessSessionListRequest { Limit = 20 });
+        await client.Channels.ArchiveAsync("ev_1", "ch_1", null, "return to public");
+
+        using var create = JsonDocument.Parse(handler.Calls[0].Body!);
+        Assert.Equal("test", create.RootElement.GetProperty("mode").GetString());
+        using var update = JsonDocument.Parse(handler.Calls[1].Body!);
+        Assert.True(update.RootElement.GetProperty("acknowledgeDroppedAssignments").GetBoolean());
+        Assert.Equal("image/png", handler.Calls[2].ContentType);
+        Assert.Contains("/events/ev%2F1/channels/ch%2F1/access-links", handler.Calls[3].Url.ToString());
+        using var designer = JsonDocument.Parse(handler.Calls[4].Body!);
+        Assert.True(designer.RootElement.GetProperty("canPublish").GetBoolean());
+        Assert.Equal("x", linkResult["capability"]);
+        var session = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(designerResult["session"]);
+        Assert.Equal("dse_1", session["id"]);
+        Assert.Contains("status=failed", handler.Calls[5].Url.ToString());
+        Assert.Equal(
+            "https://api.seatlayer.io/v1/events/ev_1/buyer-access-sessions?limit=20",
+            handler.Calls[6].Url.ToString());
+        using var archive = JsonDocument.Parse(handler.Calls[7].Body!);
+        Assert.Equal(JsonValueKind.Null, archive.RootElement.GetProperty("destination").ValueKind);
     }
 
     [Fact]

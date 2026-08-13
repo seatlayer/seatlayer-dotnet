@@ -38,12 +38,26 @@ public sealed class ChartListRequest
     }
 }
 
+/// <summary>Optional overrides when copying a chart.</summary>
+public sealed class ChartCopyRequest
+{
+    /// <summary>Name for the copied chart.</summary>
+    public string? Name { get; set; }
+    /// <summary>Caller-owned reference for the copy.</summary>
+    public string? ExternalRef { get; set; }
+    /// <summary>Destination workspace.</summary>
+    public string? WorkspaceId { get; set; }
+    /// <summary>Optional caller key for exact server replay.</summary>
+    public string? IdempotencyKey { get; set; }
+}
+
 /// <summary>
 /// Seat-map definitions that events are created from.
 /// </summary>
 /// <remarks>
 /// Even when organisers draw their own venues in the embedded Designer you need this:
-/// <see cref="SessionsService.CreateDesignerSessionAsync"/> requires a chart id that
+/// <see cref="SessionsService.CreateDesignerSessionAsync(DesignerSessionRequest, CancellationToken)"/>
+/// requires a chart id that
 /// already exists, so the usual platform flow is copy a template here, then hand over a
 /// Designer session for it.
 /// </remarks>
@@ -99,7 +113,7 @@ public sealed class ChartsService
         string? workspaceId = null,
         string? idempotencyKey = null,
         CancellationToken cancellationToken = default)
-        => _client.PostAsync(
+        => _client.PostHeaderReplayAsync(
             "/v1/charts",
             Body.Of(("name", name), ("doc", doc), ("externalRef", externalRef), ("workspaceId", workspaceId)),
             idempotencyKey,
@@ -133,6 +147,14 @@ public sealed class ChartsService
             Body.Of(("doc", doc), ("expectedUpdatedAt", expectedUpdatedAt)),
             cancellationToken);
 
+    /// <summary>Updates name, issues, or externalRef without replacing the document.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> UpdateMetadataAsync(
+        string chartId,
+        IDictionary<string, object?> fields,
+        CancellationToken cancellationToken = default)
+        => _client.PutAsync(
+            $"/v1/charts/{SeatLayerClient.Escape(chartId)}", fields, cancellationToken);
+
     /// <summary>Deletes a chart.</summary>
     public Task<IReadOnlyDictionary<string, object?>> DeleteAsync(
         string chartId, CancellationToken cancellationToken = default)
@@ -141,8 +163,19 @@ public sealed class ChartsService
     /// <summary>Copies a chart — the usual way to provision a venue from a template.</summary>
     public Task<IReadOnlyDictionary<string, object?>> CopyAsync(
         string chartId, string? idempotencyKey = null, CancellationToken cancellationToken = default)
-        => _client.PostAsync(
+        => _client.PostHeaderReplayAsync(
             $"/v1/charts/{SeatLayerClient.Escape(chartId)}/duplicate", null, idempotencyKey, cancellationToken);
+
+    /// <summary>Copies a chart with name, reference, or destination-workspace overrides.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> CopyWithOptionsAsync(
+        string chartId, ChartCopyRequest request, CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            $"/v1/charts/{SeatLayerClient.Escape(chartId)}/duplicate",
+            Body.Of(
+                ("name", request.Name), ("externalRef", request.ExternalRef),
+                ("workspaceId", request.WorkspaceId)),
+            request.IdempotencyKey,
+            cancellationToken);
 
     /// <summary>Moves a chart to the archive.</summary>
     public Task<IReadOnlyDictionary<string, object?>> ArchiveAsync(
@@ -202,6 +235,39 @@ public sealed class EventListRequest
     }
 }
 
+/// <summary>Full public request for creating an event from a published chart.</summary>
+public sealed class EventCreateRequest
+{
+    /// <summary>Published chart to instantiate.</summary>
+    public required string ChartId { get; set; }
+    /// <summary>Display name.</summary>
+    public string? Name { get; set; }
+    /// <summary>Public URL slug.</summary>
+    public string? Slug { get; set; }
+    /// <summary>Start epoch milliseconds.</summary>
+    public long? StartsAt { get; set; }
+    /// <summary>Venue label.</summary>
+    public string? Venue { get; set; }
+    /// <summary>Caller-owned stable reference.</summary>
+    public string? ExternalRef { get; set; }
+    /// <summary>ISO currency code.</summary>
+    public string? Currency { get; set; }
+    /// <summary>Public event description.</summary>
+    public string? Description { get; set; }
+    /// <summary>End epoch milliseconds.</summary>
+    public long? EndsAt { get; set; }
+    /// <summary>IANA timezone.</summary>
+    public string? Timezone { get; set; }
+    /// <summary>BCP 47 locale.</summary>
+    public string? Locale { get; set; }
+    /// <summary>Pre-uploaded poster asset id.</summary>
+    public string? PosterAssetId { get; set; }
+    /// <summary>live or test.</summary>
+    public string? Mode { get; set; }
+    /// <summary>Optional caller key for exact server replay.</summary>
+    public string? IdempotencyKey { get; set; }
+}
+
 /// <summary>Event lifecycle, metadata and reports.</summary>
 public sealed class EventsService
 {
@@ -254,12 +320,27 @@ public sealed class EventsService
         string? currency = null,
         string? idempotencyKey = null,
         CancellationToken cancellationToken = default)
-        => _client.PostAsync(
+        => _client.PostHeaderReplayAsync(
             "/v1/events",
             Body.Of(
                 ("chartId", chartId), ("name", name), ("slug", slug), ("startsAt", startsAt),
                 ("venue", venue), ("externalRef", externalRef), ("currency", currency)),
             idempotencyKey,
+            cancellationToken);
+
+    /// <summary>Creates an event with the complete public metadata request.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> CreateAsync(
+        EventCreateRequest request, CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            "/v1/events",
+            Body.Of(
+                ("chartId", request.ChartId), ("name", request.Name), ("slug", request.Slug),
+                ("startsAt", request.StartsAt), ("venue", request.Venue),
+                ("externalRef", request.ExternalRef), ("currency", request.Currency),
+                ("description", request.Description), ("endsAt", request.EndsAt),
+                ("timezone", request.Timezone), ("locale", request.Locale),
+                ("posterAssetId", request.PosterAssetId), ("mode", request.Mode)),
+            request.IdempotencyKey,
             cancellationToken);
 
     /// <summary>Retrieves an event with live counts.</summary>
@@ -277,11 +358,38 @@ public sealed class EventsService
         string eventKey, CancellationToken cancellationToken = default)
         => _client.DeleteAsync($"/v1/events/{SeatLayerClient.Escape(eventKey)}", cancellationToken);
 
+    /// <summary>Uploads raw PNG, JPEG, or WebP poster bytes (maximum 5 MiB).</summary>
+    public Task<IReadOnlyDictionary<string, object?>> UpdatePosterAsync(
+        string eventKey, byte[] bytes, string contentType = "application/octet-stream",
+        CancellationToken cancellationToken = default)
+        => _client.PutBinaryAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/poster", bytes, contentType, cancellationToken);
+
+    /// <summary>Deletes the event poster.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> DeletePosterAsync(
+        string eventKey, CancellationToken cancellationToken = default)
+        => _client.DeleteAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/poster", cancellationToken);
+
     /// <summary>Moves a live event onto the latest published version of its chart.</summary>
     public Task<IReadOnlyDictionary<string, object?>> UpdateChartAsync(
         string eventKey, CancellationToken cancellationToken = default)
         => _client.PostAsync(
             $"/v1/events/{SeatLayerClient.Escape(eventKey)}/update-chart", null, null, cancellationToken);
+
+    /// <summary>Updates the chart while explicitly acknowledging assignment loss when required.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> UpdateChartAsync(
+        string eventKey,
+        bool? acknowledgeDroppedAssignments,
+        string? reason,
+        CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/update-chart",
+            Body.Of(
+                ("acknowledgeDroppedAssignments", acknowledgeDroppedAssignments),
+                ("reason", reason)),
+            null,
+            cancellationToken);
 
     /// <summary>Stops buyer sales. Existing holds keep their TTL.</summary>
     public Task<IReadOnlyDictionary<string, object?>> CloseAsync(
@@ -308,10 +416,12 @@ public sealed class EventsService
 
     /// <summary>Sets the checkout window, in milliseconds.</summary>
     public Task<IReadOnlyDictionary<string, object?>> UpdateHoldTtlAsync(
-        string eventKey, long holdTtlMs, CancellationToken cancellationToken = default)
-        => _client.PostAsync(
-            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/hold-ttl",
-            Body.Of(("holdTtlMs", holdTtlMs)), null, cancellationToken);
+        string eventKey, long? holdTtlMs, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?> { ["holdTtlMs"] = holdTtlMs };
+        return _client.PostAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/hold-ttl", body, null, cancellationToken);
+    }
 
     /// <summary>Retrieves the event report.</summary>
     public Task<IReadOnlyDictionary<string, object?>> RetrieveReportAsync(
@@ -322,4 +432,16 @@ public sealed class EventsService
     public Task<IReadOnlyDictionary<string, object?>> RetrieveLogAsync(
         string eventKey, CancellationToken cancellationToken = default)
         => _client.GetAsync($"/v1/events/{SeatLayerClient.Escape(eventKey)}/log", null, cancellationToken);
+
+    /// <summary>Retrieves a bounded page of event audit entries.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> RetrieveLogAsync(
+        string eventKey, int? limit, long? before, CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/log",
+            new Dictionary<string, string?>
+            {
+                ["limit"] = limit?.ToString(),
+                ["before"] = before?.ToString(),
+            },
+            cancellationToken);
 }
