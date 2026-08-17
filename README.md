@@ -25,8 +25,9 @@ using SeatLayer;
 
 var client = new SeatLayerClient(Environment.GetEnvironmentVariable("SEATLAYER_SECRET_KEY")!);
 
-// 1. Provision a venue for a new organiser from one of your templates.
-var chart = (IReadOnlyDictionary<string, object?>)(await client.Charts.CopyAsync("c_template_arena"))["meta"]!;
+// 1. Materialize a published catalog template as a draft for this organiser.
+var chart = (IReadOnlyDictionary<string, object?>)(
+    await client.Templates.InstantiateTemplateAsync("your-published-template"))["meta"]!;
 await client.Charts.PublishAsync((string)chart["id"]!);
 
 // 2. Create an event on it.
@@ -263,12 +264,13 @@ support requests.
 ## Reliability
 
 **Retries.** Reads (`GET`/`HEAD`) retry 429, 408 and 5xx with exponential backoff and full jitter;
-`Retry-After` wins when the server sends it. Automatic mutation retries are limited to the four
+`Retry-After` wins when the server sends it. Automatic mutation retries are limited to the five
 operations backed by exact response replay: `Charts.CreateAsync`, `Charts.CopyAsync`,
-`Events.CreateAsync`, and `Workspaces.CreateAsync`. Other 4xx responses are never retried. A cancelled
-`CancellationToken` stops the loop immediately rather than being treated as a transient fault.
+`Templates.InstantiateTemplateAsync`, `Events.CreateAsync`, and `Workspaces.CreateAsync`. Other 4xx
+responses are never retried. A cancelled `CancellationToken` stops the loop immediately rather than
+being treated as a transient fault.
 
-**Idempotency.** Those four replay-backed operations carry an `Idempotency-Key`, generated when you
+**Idempotency.** Those five replay-backed operations carry an `Idempotency-Key`, generated when you
 do not supply one and reused across attempts. Other mutations are single-attempt and receive no
 automatic key. A caller-supplied key is forwarded but does not enable retries. This includes
 inventory holds and bookings, show-once credential or secret creation, unsupported operations, and
@@ -298,7 +300,8 @@ await client.SendAsync(HttpMethod.Post, "/v1/events/ev_1/some-new-route",
 | Service | Methods |
 | --- | --- |
 | `Charts` | `ListAsync` `ListAllAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` `DeleteAsync` `CopyAsync` `ArchiveAsync` `UnarchiveAsync` `PublishAsync` |
-| `Events` | `ListAsync` `ListAllAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` `DeleteAsync` `UpdateChartAsync` `CloseAsync` `ReopenAsync` `ArchiveAsync` `RetrieveHoldTtlAsync` `UpdateHoldTtlAsync` `RetrieveReportAsync` `RetrieveLogAsync` |
+| `Templates` | `InstantiateTemplateAsync` |
+| `Events` | `ListAsync` `ListAllAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` `DeleteAsync` `UpdateChartAsync` `CloseAsync` `ReopenAsync` `ArchiveAsync` `RetrieveHoldTtlAsync` `UpdateHoldTtlAsync` `ListTicketReleasesAsync` `UpdateTicketReleasesAsync` `CloseTicketReleaseAsync` `RetrieveReportAsync` `RetrieveLogAsync` |
 | `Channels` | `ListAsync` `CreateAsync` `UpdateAsync` `UpdateAssignmentsAsync` `ListAllocationAsync` `RetrieveAccessPreviewAsync` `RetrieveReportAsync` `PauseAsync` `UnpauseAsync` `ArchiveAsync` `CreateBuyerAccessSessionAsync` `ListBuyerAccessSessionsAsync` `RevokeBuyerAccessSessionAsync` |
 | `Inventory` | `HoldAsync` `HoldBestAvailableAsync` `BookBestAvailableAsync` `ExtendHoldAsync` `RetrieveHoldAsync` `ReleaseAsync` `BookAsync` `BookLabelsAsync` `BoxOfficeBookAsync` `UnbookAsync` `BlockAsync` `UnblockAsync` `UnblockAllAsync` `RetrieveAvailabilityAsync` `UpdateAvailabilityAsync` `ListBookingsAsync` `RetrieveBookingAsync` |
 | `Sessions` | `CreateManageSessionAsync` `RevokeManageSessionAsync` `CreateDesignerSessionAsync` `RevokeDesignerSessionAsync` |

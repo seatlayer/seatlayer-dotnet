@@ -144,6 +144,66 @@ public class ClientTests
     }
 
     [Fact]
+    public async Task TemplateInstantiationUsesObjectBodyEscapedPathAndHeaderReplay()
+    {
+        var retryNow = new Dictionary<string, string> { ["Retry-After"] = "0" };
+        var (client, handler) = Build(new[]
+        {
+            Status((HttpStatusCode)429, "{\"error\":\"rate_limited\"}", retryNow),
+            Status(HttpStatusCode.Created, "{\"meta\":{}}"),
+        });
+
+        await client.Templates.InstantiateTemplateAsync("tpl / main");
+
+        Assert.Equal(2, handler.Calls.Count);
+        Assert.All(handler.Calls, call =>
+        {
+            Assert.Equal(HttpMethod.Post, call.Method);
+            Assert.Equal("https://api.seatlayer.io/v1/templates/tpl%20%2F%20main/instantiate", call.Url.AbsoluteUri);
+            Assert.Equal("{}", call.Body);
+        });
+        Assert.Equal(
+            handler.Calls[0].Headers.GetValues("Idempotency-Key").Single(),
+            handler.Calls[1].Headers.GetValues("Idempotency-Key").Single());
+    }
+
+    [Fact]
+    public async Task TicketReleaseMethodsUseWholeListBodyEscapedPathsAndSingleAttempts()
+    {
+        var retryNow = new Dictionary<string, string> { ["Retry-After"] = "0" };
+        var (client, handler) = Build(new[]
+        {
+            Ok("{\"releases\":[]}"),
+            Status((HttpStatusCode)429, "{\"error\":\"rate_limited\"}", retryNow),
+            Status((HttpStatusCode)429, "{\"error\":\"rate_limited\"}", retryNow),
+        });
+
+        await client.Events.ListTicketReleasesAsync("ev / main");
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(() => client.Events.UpdateTicketReleasesAsync(
+            "ev / main",
+            new TicketReleaseReplaceRequest
+            {
+                Releases = new[] { new TicketReleaseInput { Name = "Early bird", Price = 18 } },
+            }));
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(
+            () => client.Events.CloseTicketReleaseAsync("ev / main", "rel / one"));
+
+        Assert.Equal(3, handler.Calls.Count);
+        Assert.Equal("https://api.seatlayer.io/v1/events/ev%20%2F%20main/releases", handler.Calls[0].Url.AbsoluteUri);
+        Assert.Equal(HttpMethod.Put, handler.Calls[1].Method);
+        using var update = JsonDocument.Parse(handler.Calls[1].Body!);
+        var release = update.RootElement.GetProperty("releases")[0];
+        Assert.Equal("Early bird", release.GetProperty("name").GetString());
+        Assert.Equal(18, release.GetProperty("price").GetInt32());
+        Assert.False(release.TryGetProperty("position", out _));
+        Assert.False(handler.Calls[1].Headers.Contains("Idempotency-Key"));
+        Assert.Equal(
+            "https://api.seatlayer.io/v1/events/ev%20%2F%20main/releases/rel%20%2F%20one/close",
+            handler.Calls[2].Url.AbsoluteUri);
+        Assert.False(handler.Calls[2].Headers.Contains("Idempotency-Key"));
+    }
+
+    [Fact]
     public async Task HonoursCallerIdempotencyKey()
     {
         var (client, handler) = Build(new[] { Status(HttpStatusCode.Created, "{}") });
