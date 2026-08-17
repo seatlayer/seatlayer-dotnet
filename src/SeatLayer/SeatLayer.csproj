@@ -20,7 +20,7 @@
     <Description>Official .NET server SDK for the SeatLayer reserved-seating API. Server-side only.</Description>
     <PackageTags>seatlayer;reserved-seating;seating-chart;ticketing;box-office</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://docs.seatlayer.io/server-sdk/install/</PackageProjectUrl>
+    <PackageProjectUrl>https://seatlayer.io/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/seatlayer/seatlayer-dotnet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
