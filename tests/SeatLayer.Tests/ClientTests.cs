@@ -243,6 +243,85 @@ public class ClientTests
         Assert.True(body.RootElement.TryGetProperty("chartId", out _));
     }
 
+    [Fact]
+    public async Task PerformanceGroupsUseTheTrustedServerWorkflow()
+    {
+        // The browser picker only receives the one-time bearer from this server
+        // resource; the secret key remains confined to this client.
+        var (client, handler) = Build(new[]
+        {
+            Ok("{\"performanceGroups\":[]}"),
+            Status(HttpStatusCode.Created, "{\"performanceGroup\":{\"key\":\"pg_1\"}}"),
+            Ok("{\"performanceGroup\":{\"key\":\"pg_1\"}}"),
+            Status(HttpStatusCode.NoContent, ""),
+            Status(HttpStatusCode.Accepted, "{\"lifecycleOperation\":{\"operationId\":\"op_a\"}}"),
+            Status(HttpStatusCode.Accepted, "{\"lifecycleOperation\":{\"operationId\":\"op_c\"}}"),
+            Ok("{\"lifecycleOperation\":{\"operationId\":\"op_a\"}}"),
+            Status(HttpStatusCode.Created, "{\"buyerAccessSession\":{\"token\":\"one_time\"}}"),
+            Ok("{\"sessions\":[]}"),
+            Ok("{\"ok\":true}"),
+            Ok("{\"hold\":{\"operationId\":\"hold_1\"}}"),
+            Status(HttpStatusCode.Accepted, "{\"booking\":{\"bookActionId\":\"book_1\"}}"),
+            Ok("{\"booking\":{\"bookActionId\":\"book_1\"}}"),
+        });
+        var groups = client.PerformanceGroups;
+
+        await groups.ListAsync(new PerformanceGroupListRequest
+        {
+            WorkspaceId = "ws_1", ExternalRef = "bundle-42", State = "active", Limit = 5, Cursor = "next_1",
+        });
+        await groups.CreateAsync(new PerformanceGroupCreateRequest
+        {
+            Name = "Three-night run", EventKeys = new[] { "ev_1", "ev_2" }, ExternalRef = "bundle-42",
+        });
+        await groups.RetrieveAsync("pg/a");
+        await groups.DeleteAsync("pg/a");
+        await groups.ActivateAsync("pg/a", new PerformanceGroupLifecycleRequest { ExpectedRevision = 3 });
+        await groups.CloseAsync("pg/a", new PerformanceGroupLifecycleRequest { ExpectedRevision = 4 });
+        await groups.RetrieveLifecycleAsync("pg/a", "op/activate");
+        await groups.CreateBuyerAccessSessionAsync("pg/a", new PerformanceGroupBuyerAccessSessionRequest
+        {
+            AllowedOrigin = "https://tickets.example",
+            IncludePublic = false,
+            ChannelIdsByEvent = new Dictionary<string, IEnumerable<string>> { ["ev_1"] = new[] { "ch_1" } },
+            ExpiresInSeconds = 600,
+            MaxQuantity = 4,
+            BuyerRef = "buyer_1",
+        });
+        await groups.ListBuyerAccessSessionsAsync(
+            "pg/a", new PerformanceGroupBuyerAccessSessionListRequest { Limit = 10 });
+        await groups.RevokeBuyerAccessSessionAsync("pg/a", "bas/1");
+        await groups.RetrieveHoldAsync("pg/a", "hold/1");
+        await groups.BookHoldAsync("pg/a", "hold/1", new PerformanceGroupBookRequest
+        {
+            BookActionId = "book/1", BookingRef = "merchant-order-9",
+        });
+        await groups.RetrieveBookingAsync("pg/a", "book/1");
+
+        Assert.Equal(
+            "https://api.seatlayer.io/v1/performance-groups?workspaceId=ws_1&externalRef=bundle-42&state=active&limit=5&cursor=next_1",
+            handler.Calls[0].Url.ToString());
+        Assert.True(handler.Calls[1].Headers.Contains("Idempotency-Key"));
+        Assert.Equal("https://api.seatlayer.io/v1/performance-groups/pg%2Fa", handler.Calls[2].Url.AbsoluteUri);
+        Assert.Equal(HttpMethod.Delete, handler.Calls[3].Method);
+        Assert.Equal("{\"expectedRevision\":3}", handler.Calls[4].Body);
+        Assert.Equal("{\"expectedRevision\":4}", handler.Calls[5].Body);
+        Assert.EndsWith("/lifecycle/op%2Factivate", handler.Calls[6].Url.AbsoluteUri);
+        Assert.False(handler.Calls[7].Headers.Contains("Idempotency-Key"));
+        using var buyerAccessBody = JsonDocument.Parse(handler.Calls[7].Body!);
+        Assert.False(buyerAccessBody.RootElement.GetProperty("includePublic").GetBoolean());
+        Assert.Equal(4, buyerAccessBody.RootElement.GetProperty("maxQuantity").GetInt32());
+        Assert.EndsWith("/buyer-access-sessions?limit=10", handler.Calls[8].Url.ToString());
+        Assert.EndsWith("/buyer-access-sessions/bas%2F1", handler.Calls[9].Url.AbsoluteUri);
+        Assert.EndsWith("/holds/hold%2F1", handler.Calls[10].Url.AbsoluteUri);
+        Assert.False(handler.Calls[11].Headers.Contains("Idempotency-Key"));
+        Assert.EndsWith("/holds/hold%2F1/book", handler.Calls[11].Url.AbsoluteUri);
+        using var bookingBody = JsonDocument.Parse(handler.Calls[11].Body!);
+        Assert.Equal("book/1", bookingBody.RootElement.GetProperty("bookActionId").GetString());
+        Assert.Equal("merchant-order-9", bookingBody.RootElement.GetProperty("bookingRef").GetString());
+        Assert.EndsWith("/bookings/book%2F1", handler.Calls[12].Url.AbsoluteUri);
+    }
+
     // ---------- errors ----------
 
     [Fact]
