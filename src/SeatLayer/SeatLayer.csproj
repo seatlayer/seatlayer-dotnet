@@ -14,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>SeatLayer</PackageId>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Authors>SeatLayer</Authors>
     <Company>SeatLayer</Company>
     <Description>Official .NET server SDK for the SeatLayer reserved-seating API. Server-side only.</Description>
