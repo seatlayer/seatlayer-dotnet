@@ -90,6 +90,7 @@ public sealed class SeatLayerClient : IDisposable
         Channels = new ChannelsService(this);
         Events = new EventsService(this);
         Inventory = new InventoryService(this);
+        PerformanceGroups = new PerformanceGroupsService(this);
         Sessions = new SessionsService(this);
         Templates = new TemplatesService(this);
         Webhooks = new WebhooksService(this);
@@ -110,6 +111,9 @@ public sealed class SeatLayerClient : IDisposable
 
     /// <summary>Holds, booking, blocking and availability.</summary>
     public InventoryService Inventory { get; }
+
+    /// <summary>Fixed multi-performance runs, buyer access, and group booking lifecycle.</summary>
+    public PerformanceGroupsService PerformanceGroups { get; }
 
     /// <summary>Short-lived, origin-bound browser tokens.</summary>
     public SessionsService Sessions { get; }

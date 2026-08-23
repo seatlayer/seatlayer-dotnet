@@ -6,6 +6,14 @@
   attach/detach through `Events.RetrieveConfigurationBindingAsync` and
   `Events.UpdateConfigurationBindingAsync`. Updates remain deliberately single-attempt.
 
+## 0.5.0 — 2026-08-21
+
+- Added `PerformanceGroups`, the trusted server resource for fixed two-to-eight
+  performance runs. It creates and activates groups, mints one-time browser
+  access, retrieves authoritative group holds, and confirms bookings with
+  stable action and order references. Browser-only group routes remain outside
+  this secret-key SDK.
+
 - **Security/reliability:** Mutations now default to a single attempt. Automatic header-replay
   retries are limited to chart create/copy, template instantiation, event create, and workspace
   create, preventing transient failures from duplicating holds or best-available results and from
