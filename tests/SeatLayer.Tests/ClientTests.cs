@@ -204,6 +204,68 @@ public class ClientTests
     }
 
     [Fact]
+    public async Task EventConfigurationBindingUsesExactVersionsExplicitDetachAndSingleAttempts()
+    {
+        const string binding = "{\"configuration\":{\"id\":\"ec_touring\",\"version\":3}," +
+            "\"revision\":7,\"changedBy\":\"api-key:key_1\",\"changedAt\":123,\"audit\":[" +
+            "{\"id\":\"eca_1\",\"from\":null,\"to\":{\"id\":\"ec_touring\",\"version\":3}," +
+            "\"revision\":7,\"actor\":\"api-key:key_1\",\"createdAt\":123}]}";
+        var retryNow = new Dictionary<string, string> { ["Retry-After"] = "0" };
+        var (client, handler) = Build(new[]
+        {
+            Ok(binding),
+            Ok(binding),
+            Ok("{\"configuration\":null,\"revision\":8,\"changedBy\":null,\"changedAt\":null,\"audit\":[]}"),
+            Status((HttpStatusCode)429, "{\"error\":\"rate_limited\"}", retryNow),
+        });
+
+        var retrieved = await client.Events.RetrieveConfigurationBindingAsync("ev / main");
+        var attached = await client.Events.UpdateConfigurationBindingAsync(
+            "ev / main",
+            new EventConfigurationBindingUpdateRequest
+            {
+                ExpectedRevision = 6,
+                Configuration = new EventConfigurationReference { Id = "ec_touring", Version = 3 },
+            });
+        var detached = await client.Events.UpdateConfigurationBindingAsync(
+            "ev / main",
+            new EventConfigurationBindingUpdateRequest { ExpectedRevision = 7, Configuration = null });
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(
+            () => client.Events.UpdateConfigurationBindingAsync(
+                "ev_1",
+                new EventConfigurationBindingUpdateRequest { ExpectedRevision = 8, Configuration = null }));
+
+        var configuration = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            retrieved["configuration"]);
+        Assert.Equal("ec_touring", configuration["id"]);
+        var audit = Assert.IsAssignableFrom<IReadOnlyList<object?>>(retrieved["audit"]);
+        var firstAudit = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(audit[0]);
+        Assert.Null(firstAudit["from"]);
+        Assert.NotNull(attached["configuration"]);
+        Assert.Null(detached["configuration"]);
+
+        Assert.Equal(4, handler.Calls.Count);
+        for (var index = 0; index < 3; index++)
+        {
+            Assert.Equal(
+                "https://api.seatlayer.io/v1/events/ev%20%2F%20main/event-configuration",
+                handler.Calls[index].Url.AbsoluteUri);
+        }
+        Assert.Equal(HttpMethod.Get, handler.Calls[0].Method);
+        Assert.Equal(HttpMethod.Put, handler.Calls[1].Method);
+        Assert.Equal(HttpMethod.Put, handler.Calls[2].Method);
+        using var attachBody = JsonDocument.Parse(handler.Calls[1].Body!);
+        Assert.Equal(6, attachBody.RootElement.GetProperty("expectedRevision").GetInt64());
+        Assert.Equal("ec_touring", attachBody.RootElement.GetProperty("configuration")
+            .GetProperty("id").GetString());
+        using var detachBody = JsonDocument.Parse(handler.Calls[2].Body!);
+        Assert.Equal(JsonValueKind.Null, detachBody.RootElement.GetProperty("configuration").ValueKind);
+        Assert.False(handler.Calls[1].Headers.Contains("Idempotency-Key"));
+        Assert.False(handler.Calls[2].Headers.Contains("Idempotency-Key"));
+        Assert.False(handler.Calls[3].Headers.Contains("Idempotency-Key"));
+    }
+
+    [Fact]
     public async Task HonoursCallerIdempotencyKey()
     {
         var (client, handler) = Build(new[] { Status(HttpStatusCode.Created, "{}") });

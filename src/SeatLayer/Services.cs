@@ -353,6 +353,27 @@ public sealed class TicketReleaseReplaceRequest
     public required IReadOnlyList<TicketReleaseInput> Releases { get; set; }
 }
 
+/// <summary>Selects one immutable published Event configuration version.</summary>
+/// <remarks>Configuration identity remains separate from the chart's venue geometry.</remarks>
+public sealed class EventConfigurationReference
+{
+    /// <summary>Configuration library id.</summary>
+    public required string Id { get; set; }
+
+    /// <summary>Exact immutable version to attach.</summary>
+    public required long Version { get; set; }
+}
+
+/// <summary>Compare-and-set request for an Event's configuration binding.</summary>
+public sealed class EventConfigurationBindingUpdateRequest
+{
+    /// <summary>Revision returned by the latest binding read.</summary>
+    public required long ExpectedRevision { get; set; }
+
+    /// <summary>Published version to attach, or null to explicitly detach.</summary>
+    public EventConfigurationReference? Configuration { get; set; }
+}
+
 /// <summary>Event lifecycle, metadata and reports.</summary>
 public sealed class EventsService
 {
@@ -432,6 +453,36 @@ public sealed class EventsService
     public Task<IReadOnlyDictionary<string, object?>> RetrieveAsync(
         string eventKey, CancellationToken cancellationToken = default)
         => _client.GetAsync($"/v1/events/{SeatLayerClient.Escape(eventKey)}", null, cancellationToken);
+
+    /// <summary>Reads the Event's exact immutable configuration selection and audit trail.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> RetrieveConfigurationBindingAsync(
+        string eventKey, CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/event-configuration",
+            null,
+            cancellationToken);
+
+    /// <summary>Attaches an exact published configuration version, or explicitly detaches it.</summary>
+    /// <remarks>
+    /// The expected revision prevents concurrent administrative changes from silently overwriting
+    /// each other. This mutation remains single-attempt because it has no header-replay contract.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<string, object?>> UpdateConfigurationBindingAsync(
+        string eventKey,
+        EventConfigurationBindingUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        // Body.Of removes null optional values, but null is the explicit detach instruction here.
+        var body = new Dictionary<string, object?>
+        {
+            ["expectedRevision"] = request.ExpectedRevision,
+            ["configuration"] = request.Configuration,
+        };
+        return _client.PutAsync(
+            $"/v1/events/{SeatLayerClient.Escape(eventKey)}/event-configuration",
+            body,
+            cancellationToken);
+    }
 
     /// <summary>Updates event metadata.</summary>
     public Task<IReadOnlyDictionary<string, object?>> UpdateAsync(
