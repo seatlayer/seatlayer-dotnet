@@ -17,8 +17,8 @@
     <Version>0.6.0</Version>
     <Authors>SeatLayer</Authors>
     <Company>SeatLayer</Company>
-    <Description>Official .NET server SDK for the SeatLayer reserved-seating API. Server-side only.</Description>
-    <PackageTags>seatlayer;reserved-seating;seating-chart;ticketing;box-office</PackageTags>
+    <Description>Official .NET server SDK for the SeatLayer reserved-seating ticketing API. Server-side only: inspect seat holds, price from server data, book seats with a stable booking reference, and manage seating charts, events, sales channels, and live seat inventory from C#.</Description>
+    <PackageTags>seatlayer;seating-chart;seat-map;reserved-seating;ticketing;seat-booking;seat-reservation;event-ticketing;box-office;dotnet;csharp;sdk</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://seatlayer.io/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/seatlayer/seatlayer-dotnet</RepositoryUrl>
