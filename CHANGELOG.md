@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased Season candidate
+## 0.7.0 — 2026-08-30
 
 - Added `Seasons`, covering all 48 frozen secret-key Season operations: compatibility and
   catalogue, lifecycle and sales, trusted buyer handoff, incumbent imports and renewals,
@@ -11,7 +11,6 @@
 - Season allocations are identity-only and the API response declares host pricing authority.
   Buyer rehearsal validation sends no evidence body because SeatLayer discovers the retained
   hold, booking, cancellation, and delivered webhook chain automatically.
-- This source surface is intentionally not described as published or production-ready yet.
 
 ## 0.6.1
 
