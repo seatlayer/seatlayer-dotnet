@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 — 2026-08-30
+
+- Added `Seasons`, covering all 48 frozen secret-key Season operations: compatibility and
+  catalogue, lifecycle and sales, trusted buyer handoff, incumbent imports and renewals,
+  amendments, operations, outbox recovery, audit, and support export.
+- Header-replay retries are limited to the eight Season operations whose API contract guarantees
+  exact response replay. Show-once credentials and domain-exact lifecycle, booking, cancellation,
+  and renewal commits remain single-attempt.
+- Season allocations are identity-only and the API response declares host pricing authority.
+  Buyer rehearsal validation sends no evidence body because SeatLayer discovers the retained
+  hold, booking, cancellation, and delivered webhook chain automatically.
+
 ## 0.6.1
 
 - Documentation only. Refreshes the README, adds frequently asked

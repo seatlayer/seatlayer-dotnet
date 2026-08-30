@@ -91,6 +91,7 @@ public sealed class SeatLayerClient : IDisposable
         Events = new EventsService(this);
         Inventory = new InventoryService(this);
         PerformanceGroups = new PerformanceGroupsService(this);
+        Seasons = new SeasonsService(this);
         Sessions = new SessionsService(this);
         Templates = new TemplatesService(this);
         Webhooks = new WebhooksService(this);
@@ -114,6 +115,9 @@ public sealed class SeatLayerClient : IDisposable
 
     /// <summary>Fixed multi-performance runs, buyer access, and group booking lifecycle.</summary>
     public PerformanceGroupsService PerformanceGroups { get; }
+
+    /// <summary>Fixed renewable Season catalogue, sales, renewal, and support operations.</summary>
+    public SeasonsService Seasons { get; }
 
     /// <summary>Short-lived, origin-bound browser tokens.</summary>
     public SessionsService Sessions { get; }
@@ -303,6 +307,13 @@ public sealed class SeatLayerClient : IDisposable
         CancellationToken cancellationToken = default)
         => SendCoreAsync(
             HttpMethod.Post, path, null, body, idempotencyKey,
+            MutationRetryPolicy.HeaderReplay, cancellationToken);
+
+    internal Task<IReadOnlyDictionary<string, object?>> MutationWithHeaderReplayAsync(
+        HttpMethod method, string path, object? body = null, string? idempotencyKey = null,
+        CancellationToken cancellationToken = default)
+        => SendCoreAsync(
+            method, path, null, body, idempotencyKey,
             MutationRetryPolicy.HeaderReplay, cancellationToken);
 
     internal Task<IReadOnlyDictionary<string, object?>> PutAsync(

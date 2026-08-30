@@ -11,7 +11,7 @@ seat inventory through one typed ticketing API client.
 
 [SeatLayer package on NuGet](https://www.nuget.org/packages/SeatLayer) ·
 [SeatLayer server SDK documentation](https://docs.seatlayer.io/server-sdk/install/) ·
-[SeatLayer reserved-seating platform](https://seatlayer.io/) ·
+[SeatLayer developer platform](https://seatlayer.io/developers/) ·
 [SeatLayer JavaScript seat map SDK](https://www.npmjs.com/package/@seatlayer/js) ·
 [SeatLayer AI Toolkit](https://github.com/seatlayer/seatlayer-ai-toolkit)
 
@@ -70,6 +70,36 @@ own its lifetime:
 ```csharp
 new SeatLayerClient(secretKey, new SeatLayerClientOptions { HttpClient = factory.CreateClient() });
 ```
+
+## Fixed renewable Seasons (unreleased candidate)
+
+The source candidate exposes all 48 trusted organiser operations through `client.Seasons`.
+Validate compatible events before creation, then keep the secret key on your server and give the
+browser `SeasonPicker` only the show-once, origin-bound buyer token.
+
+After the test hold/book/cancel journey and matching webhook deliveries,
+`ValidateSeasonBuyerRehearsalAsync(seasonKey)` sends no evidence body; SeatLayer discovers the
+retained chain automatically. Retrieved Season holds contain inventory identity, not an
+authoritative amount—your platform owns package price, payment, order, tax, refunds, benefits,
+and ticket or pass delivery.
+
+```csharp
+var validation = await client.Seasons.ValidateSeasonAsync(new SeasonSelectionRequest
+{
+    EventKeys = new[] { "show-friday", "show-saturday" },
+});
+
+var created = await client.Seasons.CreateSeasonAsync(new SeasonCreateRequest
+{
+    Name = "2027 subscription",
+    EventKeys = new[] { "show-friday", "show-saturday" },
+    IdempotencyKey = "season-2027-create",
+});
+```
+
+Season lifecycle, booking, cancellation, and renewal commits are domain-idempotent and therefore
+remain single-attempt. Only the eight API operations with exact header replay are retried. This
+surface is not claimed as published until the Season release gate is approved.
 
 ## Test vs live
 
