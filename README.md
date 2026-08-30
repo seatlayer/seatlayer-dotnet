@@ -71,9 +71,9 @@ own its lifetime:
 new SeatLayerClient(secretKey, new SeatLayerClientOptions { HttpClient = factory.CreateClient() });
 ```
 
-## Fixed renewable Seasons (unreleased candidate)
+## Fixed renewable Seasons
 
-The source candidate exposes all 48 trusted organiser operations through `client.Seasons`.
+Version `0.7.0` exposes all 48 trusted organiser operations through `client.Seasons`.
 Validate compatible events before creation, then keep the secret key on your server and give the
 browser `SeasonPicker` only the show-once, origin-bound buyer token.
 
@@ -98,8 +98,7 @@ var created = await client.Seasons.CreateSeasonAsync(new SeasonCreateRequest
 ```
 
 Season lifecycle, booking, cancellation, and renewal commits are domain-idempotent and therefore
-remain single-attempt. Only the eight API operations with exact header replay are retried. This
-surface is not claimed as published until the Season release gate is approved.
+remain single-attempt. Only the eight API operations with exact header replay are retried.
 
 ## Test vs live
 
