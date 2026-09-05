@@ -4,21 +4,21 @@
 [![NuGet](https://img.shields.io/nuget/v/SeatLayer.svg)](https://www.nuget.org/packages/SeatLayer)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111827.svg)](LICENSE)
 
-The official SeatLayer .NET server SDK is the **trusted side** of a reserved-seating
-integration: inspect the holds a buyer created, price from server data, and book with a
-stable `bookingRef`. From C# you manage seating charts, events, sales channels, and live
-seat inventory through one typed ticketing API client.
+SeatLayer's official .NET server SDK is the **trusted side** of its reserved seating and seat
+booking API: inspect the holds a buyer created, price from server data, and book with a stable
+`bookingRef`. From C# you manage seating charts, events, sales channels, and live seat inventory
+through one typed ticketing API client.
 
 [SeatLayer package on NuGet](https://www.nuget.org/packages/SeatLayer) ·
-[SeatLayer server SDK documentation](https://docs.seatlayer.io/server-sdk/install/) ·
+[.NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/) ·
 [SeatLayer developer platform](https://seatlayer.io/developers/) ·
 [SeatLayer JavaScript seat map SDK](https://www.npmjs.com/package/@seatlayer/js) ·
-[SeatLayer AI Toolkit](https://github.com/seatlayer/seatlayer-ai-toolkit)
+[Server API reference](https://docs.seatlayer.io/server-api/events/)
 
 > **Server-side only.** This library authenticates with your secret key. Never ship it in a client
 > application — browser surfaces get short-lived, origin-bound tokens that you mint here.
 
-## Install
+## Install the .NET seat booking SDK
 
 ```bash
 dotnet add package SeatLayer
@@ -27,10 +27,10 @@ dotnet add package SeatLayer
 Or pin it in your project file:
 
 ```xml
-<PackageReference Include="SeatLayer" Version="0.6.0" />
+<PackageReference Include="SeatLayer" Version="0.7.0" />
 ```
 
-`SeatLayer` is published on NuGet; `0.6.0` is the current release. Requires .NET 8 or newer. **No package dependencies** — `HttpClient`, `System.Text.Json` and
+`SeatLayer` is published on NuGet; `0.7.0` is the current release. Requires .NET 8 or newer. **No package dependencies** — `HttpClient`, `System.Text.Json` and
 `HMACSHA256` all ship with the framework, so the SDK forces no version on your application.
 
 ## Quick start
@@ -41,6 +41,7 @@ using SeatLayer;
 var client = new SeatLayerClient(Environment.GetEnvironmentVariable("SEATLAYER_SECRET_KEY")!);
 
 // 1. Materialize a published catalog template as a draft for this organiser.
+// Replace this placeholder with a template id from your catalog.
 var chart = (IReadOnlyDictionary<string, object?>)(
     await client.Templates.InstantiateTemplateAsync("your-published-template"))["meta"]!;
 await client.Charts.PublishAsync((string)chart["id"]!);
@@ -98,7 +99,8 @@ var created = await client.Seasons.CreateSeasonAsync(new SeasonCreateRequest
 ```
 
 Season lifecycle, booking, cancellation, and renewal commits are domain-idempotent and therefore
-remain single-attempt. Only the eight API operations with exact header replay are retried.
+remain single-attempt. The eight Season catalogue operations with exact header replay are retried;
+the full client has 14 exact-header-replay mutations.
 
 ## Test vs live
 
@@ -116,14 +118,26 @@ if (env.IsProduction() && client.Mode != "live")
 A publishable `pk_` key is rejected at construction with a message naming the mistake, rather than
 failing as a `401` three round-trips later.
 
-## The two selling flows
+## Book reserved seats from .NET
 
 **Buyer picks seats in the browser.** Your frontend holds them; your backend confirms the price and
 books. Never price from what the browser sent you — `RetrieveHoldAsync` is authoritative.
 
 ```csharp
 var hold = await client.Inventory.RetrieveHoldAsync(eventKey, holdId);
-// … charge the total of hold["items"] in hold["currency"] …
+var items = ((IEnumerable<object?>)hold["items"]!)
+    .Cast<IReadOnlyDictionary<string, object?>>()
+    .ToList();
+var currencies = items.Select(item => (string)item["currency"]!).Distinct().ToArray();
+if (currencies.Length != 1)
+{
+    throw new InvalidOperationException("A hold must use one currency.");
+}
+var currency = currencies[0];
+var total = items.Sum(item =>
+    Convert.ToDecimal(item["unitPrice"]) *
+    Convert.ToDecimal(item.TryGetValue("quantity", out var quantity) ? quantity : 1));
+// … charge `total` in `currency` …
 await client.Inventory.BookAsync(eventKey, holdId, bookingRef: charge.Id);
 ```
 
@@ -228,9 +242,11 @@ var session = await client.Sessions.CreateManageSessionAsync(
     expiresInSeconds: 3600);
 ```
 
-`capabilities` is **required** by this SDK even though the API defaults it. That default grants all
-four including `event:cancel`, which reverses paid bookings — not something that should arrive by
-forgetting an argument. Grant the smallest set the page needs.
+`capabilities` is **required** by this SDK even though the raw API safely defaults an omitted list
+to view-only (`event:view`). Keeping the argument required makes browser authority visible at every
+call site. Grant the smallest set the page needs. For Platform/SDK events, `event:cancel` returns a
+booking's inventory to sale but does not move gateway money; eligible Managed Ticketing refunds use
+the separate `event:refund` capability.
 
 ## Webhooks
 
@@ -308,18 +324,22 @@ support requests.
 ## Reliability
 
 **Retries.** Reads (`GET`/`HEAD`) retry 429, 408 and 5xx with exponential backoff and full jitter;
-`Retry-After` wins when the server sends it. Automatic mutation retries are limited to the five
-operations backed by exact response replay: `Charts.CreateAsync`, `Charts.CopyAsync`,
-`Templates.InstantiateTemplateAsync`, `Events.CreateAsync`, and `Workspaces.CreateAsync`. Other 4xx
-responses are never retried. A cancelled `CancellationToken` stops the loop immediately rather than
-being treated as a transient fault.
+`Retry-After` wins when the server sends it. Fourteen mutations use exact header replay:
+`Charts.CreateAsync`, `Charts.CopyAsync`, `Templates.InstantiateTemplateAsync`,
+`Events.CreateAsync`, `Workspaces.CreateAsync`, `PerformanceGroups.CreateAsync`,
+`Seasons.CreateSeasonAsync`, `Seasons.UpdateSeasonAsync`, `Seasons.DeleteSeasonAsync`,
+`Seasons.CreateSeasonPlanAsync`, `Seasons.DuplicateSeasonToLiveAsync`,
+`Seasons.CreateSeasonHolderImportAsync`, `Seasons.CreateSeasonRenewalOffersAsync`, and
+`Seasons.CreateSeasonAmendmentAsync`. Other 4xx responses are never retried. A cancelled
+`CancellationToken` stops the loop immediately rather than being treated as a transient fault.
 
-**Idempotency.** Those five replay-backed operations carry an `Idempotency-Key`, generated when you
-do not supply one and reused across attempts. Other mutations are single-attempt and receive no
-automatic key. A caller-supplied key is forwarded but does not enable retries. This includes
-inventory holds and bookings, show-once credential or secret creation, unsupported operations, and
-raw `SendAsync` mutations. Keep the booking reference in the booking body for reconciliation, but
-handle an unknown network outcome explicitly instead of automatically repeating the sale.
+**Idempotency.** Those 14 replay-backed operations carry an `Idempotency-Key`, generated when you
+do not supply one and reused across attempts. All remaining SDK mutations are single-attempt. Some
+have a server-side domain idempotency contract, but the SDK does not retry them automatically. This
+includes inventory holds and bookings, show-once credential or secret creation, unsupported
+operations, and raw `SendAsync` mutations. Keep the booking reference in the booking body for
+reconciliation, but handle an unknown network outcome explicitly instead of automatically
+repeating the sale.
 
 ```csharp
 new SeatLayerClient(secretKey, new SeatLayerClientOptions
@@ -341,6 +361,10 @@ await client.SendAsync(HttpMethod.Post, "/v1/events/ev_1/some-new-route",
 
 ## API surface
 
+The client exposes these services. Performance Groups cover runs, sessions, holds, and bookings;
+Seasons cover catalogue, plan, sales, buyer-session, booking, renewal, occurrence, reporting,
+outbox, and support operations.
+
 | Service | Methods |
 | --- | --- |
 | `Charts` | `ListAsync` `ListAllAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` `DeleteAsync` `CopyAsync` `ArchiveAsync` `UnarchiveAsync` `PublishAsync` |
@@ -351,8 +375,10 @@ await client.SendAsync(HttpMethod.Post, "/v1/events/ev_1/some-new-route",
 | `Sessions` | `CreateManageSessionAsync` `RevokeManageSessionAsync` `CreateDesignerSessionAsync` `RevokeDesignerSessionAsync` |
 | `Webhooks` | `ListAsync` `CreateAsync` `UpdateAsync` `DeleteAsync` `ListDeliveriesAsync` |
 | `Workspaces` | `ListAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` |
+| `PerformanceGroups` | `ListAsync` `CreateAsync` `RetrieveAsync` `DeleteAsync` `ActivateAsync` `CloseAsync` `RetrieveLifecycleAsync` `CreateBuyerAccessSessionAsync` `ListBuyerAccessSessionsAsync` `RevokeBuyerAccessSessionAsync` `RetrieveHoldAsync` `BookHoldAsync` `RetrieveBookingAsync` |
+| `Seasons` | 48 operations for catalogue and Plan lifecycle, sales windows, buyer access and booking, holder imports, renewals, occurrence amendments, reports, audit, outbox, and support export |
 
-Full reference: [docs.seatlayer.io/server-sdk](https://docs.seatlayer.io/server-sdk/install/)
+Full reference: [SeatLayer .NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/)
 
 ## Frequently asked questions
 
@@ -376,8 +402,8 @@ sale from `Inventory.RetrieveHoldAsync`, never from values the browser sent you.
 ### How do temporary seat holds work server-side?
 
 A hold reserves seats against concurrent buyers for a limited checkout window. From .NET you
-retrieve it with `Inventory.RetrieveHoldAsync`, whose `items` and `currency` are authoritative for
-pricing, and confirm it with `Inventory.BookAsync`. Use `Inventory.ExtendHoldAsync` for a long
+retrieve it with `Inventory.RetrieveHoldAsync`, whose item-level price, quantity, and currency are
+authoritative, and confirm it with `Inventory.BookAsync`. Use `Inventory.ExtendHoldAsync` for a long
 checkout instead of releasing and re-holding, which would hand the seats to whoever is racing for
 them. Booking is a single automatic attempt: after an unknown network outcome you may reconcile
 and repeat the exact same event, hold, and `bookingRef` — seats already booked under that
@@ -385,15 +411,16 @@ reference are not sold again.
 
 ### Can I use my own payment provider?
 
-Yes. SeatLayer never processes payment. Charge through Stripe, Adyen, Braintree, or any provider
-you already use, calculating the total from the server-inspected hold items rather than from
-client input, then call `Inventory.BookAsync` with your charge or order id as the `bookingRef`.
-The [holds and checkout guide](https://docs.seatlayer.io/buyer-sdk/holds-and-checkout/) walks
-through the full handoff.
+Yes. This server SDK does not process payment in a Platform/SDK integration. Charge through the
+provider you already use, calculating the total from each server-inspected hold item's
+`unitPrice`, `quantity`, and `currency`, then call `Inventory.BookAsync` with your charge or order
+id as the `bookingRef`. Managed Ticketing is a separate product path with organizer-connected
+payments. The [holds and checkout guide](https://docs.seatlayer.io/buyer-sdk/holds-and-checkout/)
+walks through the full handoff.
 
 ## Continue your .NET integration
 
-- [Follow the SeatLayer server SDK guide](https://docs.seatlayer.io/server-sdk/install/)
+- [Follow the .NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/)
   for installation, authentication, and the full hold-to-booking flow.
 - [Handle errors, retries, and safe booking repeats](https://docs.seatlayer.io/server-sdk/reliability/)
   before connecting a production order flow.
