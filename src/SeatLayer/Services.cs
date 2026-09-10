@@ -5,16 +5,27 @@ namespace SeatLayer;
 /// <summary>Provider-neutral values for Event inventory placement.</summary>
 public static class EventHostingRegions
 {
+    /// <summary>Western Europe.</summary>
     public const string WesternEurope = "western-europe";
+    /// <summary>Eastern Europe.</summary>
     public const string EasternEurope = "eastern-europe";
+    /// <summary>Eastern North America.</summary>
     public const string NorthAmericaEast = "north-america-east";
+    /// <summary>Western North America.</summary>
     public const string NorthAmericaWest = "north-america-west";
+    /// <summary>South America.</summary>
     public const string SouthAmerica = "south-america";
+    /// <summary>South Asia and nearby Asia-Pacific locations.</summary>
     public const string AsiaPacific = "asia-pacific";
+    /// <summary>Northeast Asia.</summary>
     public const string NortheastAsia = "northeast-asia";
+    /// <summary>Southeast Asia.</summary>
     public const string SoutheastAsia = "southeast-asia";
+    /// <summary>Australia, New Zealand, and nearby Oceania locations.</summary>
     public const string Oceania = "oceania";
+    /// <summary>Africa.</summary>
     public const string Africa = "africa";
+    /// <summary>Middle East.</summary>
     public const string MiddleEast = "middle-east";
 }
 
