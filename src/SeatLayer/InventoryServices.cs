@@ -606,9 +606,9 @@ public sealed class WorkspacesService
     /// <summary>Provisions a workspace, typically one per tenant.</summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateAsync(
         string name, string? externalRef = null, string? idempotencyKey = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? defaultRegion = null)
         => _client.PostHeaderReplayAsync(
-            "/v1/workspaces", Body.Of(("name", name), ("externalRef", externalRef)),
+            "/v1/workspaces", Body.Of(("name", name), ("externalRef", externalRef), ("defaultRegion", defaultRegion)),
             idempotencyKey, cancellationToken);
 
     /// <summary>Retrieves one workspace.</summary>
@@ -627,4 +627,12 @@ public sealed class WorkspacesService
         string workspaceId, IDictionary<string, object?> fields, CancellationToken cancellationToken = default)
         => _client.PatchAsync(
             $"/v1/workspaces/{SeatLayerClient.Escape(workspaceId)}", fields, cancellationToken);
+
+    /// <summary>Changes the default used only by Events created after this update.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> UpdateDefaultRegionAsync(
+        string workspaceId, string defaultRegion, CancellationToken cancellationToken = default)
+        => UpdateAsync(
+            workspaceId,
+            new Dictionary<string, object?> { ["defaultRegion"] = defaultRegion },
+            cancellationToken);
 }

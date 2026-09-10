@@ -2,6 +2,33 @@ using System.Runtime.CompilerServices;
 
 namespace SeatLayer;
 
+/// <summary>Provider-neutral values for Event inventory placement.</summary>
+public static class EventHostingRegions
+{
+    /// <summary>Western Europe.</summary>
+    public const string WesternEurope = "western-europe";
+    /// <summary>Eastern Europe.</summary>
+    public const string EasternEurope = "eastern-europe";
+    /// <summary>Eastern North America.</summary>
+    public const string NorthAmericaEast = "north-america-east";
+    /// <summary>Western North America.</summary>
+    public const string NorthAmericaWest = "north-america-west";
+    /// <summary>South America.</summary>
+    public const string SouthAmerica = "south-america";
+    /// <summary>South Asia and nearby Asia-Pacific locations.</summary>
+    public const string AsiaPacific = "asia-pacific";
+    /// <summary>Northeast Asia.</summary>
+    public const string NortheastAsia = "northeast-asia";
+    /// <summary>Southeast Asia.</summary>
+    public const string SoutheastAsia = "southeast-asia";
+    /// <summary>Australia, New Zealand, and nearby Oceania locations.</summary>
+    public const string Oceania = "oceania";
+    /// <summary>Africa.</summary>
+    public const string Africa = "africa";
+    /// <summary>Middle East.</summary>
+    public const string MiddleEast = "middle-east";
+}
+
 /// <summary>Filters and paging for a chart listing.</summary>
 public sealed class ChartListRequest
 {
@@ -314,6 +341,8 @@ public sealed class EventCreateRequest
     public string? PosterAssetId { get; set; }
     /// <summary>live or test.</summary>
     public string? Mode { get; set; }
+    /// <summary>Live-inventory region nearest the venue. Defaults to Western Europe.</summary>
+    public string? Region { get; set; }
     /// <summary>Optional caller key for exact server replay.</summary>
     public string? IdempotencyKey { get; set; }
 }
@@ -445,7 +474,8 @@ public sealed class EventsService
                 ("externalRef", request.ExternalRef), ("currency", request.Currency),
                 ("description", request.Description), ("endsAt", request.EndsAt),
                 ("timezone", request.Timezone), ("locale", request.Locale),
-                ("posterAssetId", request.PosterAssetId), ("mode", request.Mode)),
+                ("posterAssetId", request.PosterAssetId), ("mode", request.Mode),
+                ("region", request.Region)),
             request.IdempotencyKey,
             cancellationToken);
 

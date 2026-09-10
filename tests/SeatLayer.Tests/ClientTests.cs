@@ -780,6 +780,7 @@ public class ClientTests
             Timezone = "Europe/London",
             Locale = "en-GB",
             Mode = "test",
+            Region = EventHostingRegions.WesternEurope,
         });
         await client.Events.UpdateChartAsync("ev_1", true, "accept allocation drop");
         await client.Events.UpdatePosterAsync("ev_1", new byte[] { 0x89, 0x50, 0x4e, 0x47 }, "image/png");
@@ -809,6 +810,7 @@ public class ClientTests
 
         using var create = JsonDocument.Parse(handler.Calls[0].Body!);
         Assert.Equal("test", create.RootElement.GetProperty("mode").GetString());
+        Assert.Equal("western-europe", create.RootElement.GetProperty("region").GetString());
         using var update = JsonDocument.Parse(handler.Calls[1].Body!);
         Assert.True(update.RootElement.GetProperty("acknowledgeDroppedAssignments").GetBoolean());
         Assert.Equal("image/png", handler.Calls[2].ContentType);
