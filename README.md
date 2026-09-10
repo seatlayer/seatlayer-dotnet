@@ -27,10 +27,10 @@ dotnet add package SeatLayer
 Or pin it in your project file:
 
 ```xml
-<PackageReference Include="SeatLayer" Version="0.7.0" />
+<PackageReference Include="SeatLayer" Version="0.8.0" />
 ```
 
-`SeatLayer` is published on NuGet; `0.7.0` is the current release. Requires .NET 8 or newer. **No package dependencies** — `HttpClient`, `System.Text.Json` and
+`SeatLayer` is published on NuGet; `0.8.0` is the current release. Requires .NET 8 or newer. **No package dependencies** — `HttpClient`, `System.Text.Json` and
 `HMACSHA256` all ship with the framework, so the SDK forces no version on your application.
 
 ## Quick start
