@@ -47,7 +47,13 @@ var chart = (IReadOnlyDictionary<string, object?>)(
 await client.Charts.PublishAsync((string)chart["id"]!);
 
 // 2. Create an event on it.
-var created = await client.Events.CreateAsync((string)chart["id"]!, name: "Spring Gala");
+var created = await client.Events.CreateAsync(new EventCreateRequest
+{
+    ChartId = (string)chart["id"]!,
+    Name = "Spring Gala",
+    Currency = "EUR", // leave unset to inherit the workspace currency
+    Region = EventHostingRegions.WesternEurope, // India: AsiaPacific
+});
 var meta = (IReadOnlyDictionary<string, object?>)created["meta"]!;
 var eventKey = (string)meta["key"]!;
 
@@ -56,6 +62,20 @@ var held = await client.Inventory.HoldBestAvailableAsync(eventKey, new BestAvail
 // … take payment against held["items"], which carry authoritative prices …
 await client.Inventory.BookAsync(eventKey, (string)held["holdId"]!, bookingRef: "order-8842");
 ```
+
+## Event hosting region
+
+Set `EventCreateRequest.Region` based on the **event venue**, not your API server or office. It
+controls the initial placement of the Event's live inventory; an existing Event
+cannot be moved later. Leave it unset to inherit the workspace default (`western-europe` for new accounts).
+Set that default with the named `defaultRegion` argument to `Workspaces.CreateAsync` or
+`Workspaces.UpdateDefaultRegionAsync`; changing it affects only future Events.
+
+- `western-europe`, `eastern-europe`, `north-america-east`, `north-america-west`, `south-america`
+- `asia-pacific`, `northeast-asia`, `southeast-asia`, `oceania`, `africa`, `middle-east`
+
+The hint is best effort, not a data-residency guarantee. See the
+[full Event region guide](https://docs.seatlayer.io/server-api/event-regions/).
 
 Register the client as a **singleton**. It is thread-safe, and its `HttpClient` is meant to be
 long-lived — constructing one per request exhausts sockets.

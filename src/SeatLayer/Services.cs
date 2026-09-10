@@ -2,6 +2,22 @@ using System.Runtime.CompilerServices;
 
 namespace SeatLayer;
 
+/// <summary>Provider-neutral values for Event inventory placement.</summary>
+public static class EventHostingRegions
+{
+    public const string WesternEurope = "western-europe";
+    public const string EasternEurope = "eastern-europe";
+    public const string NorthAmericaEast = "north-america-east";
+    public const string NorthAmericaWest = "north-america-west";
+    public const string SouthAmerica = "south-america";
+    public const string AsiaPacific = "asia-pacific";
+    public const string NortheastAsia = "northeast-asia";
+    public const string SoutheastAsia = "southeast-asia";
+    public const string Oceania = "oceania";
+    public const string Africa = "africa";
+    public const string MiddleEast = "middle-east";
+}
+
 /// <summary>Filters and paging for a chart listing.</summary>
 public sealed class ChartListRequest
 {
@@ -314,6 +330,8 @@ public sealed class EventCreateRequest
     public string? PosterAssetId { get; set; }
     /// <summary>live or test.</summary>
     public string? Mode { get; set; }
+    /// <summary>Live-inventory region nearest the venue. Defaults to Western Europe.</summary>
+    public string? Region { get; set; }
     /// <summary>Optional caller key for exact server replay.</summary>
     public string? IdempotencyKey { get; set; }
 }
@@ -445,7 +463,8 @@ public sealed class EventsService
                 ("externalRef", request.ExternalRef), ("currency", request.Currency),
                 ("description", request.Description), ("endsAt", request.EndsAt),
                 ("timezone", request.Timezone), ("locale", request.Locale),
-                ("posterAssetId", request.PosterAssetId), ("mode", request.Mode)),
+                ("posterAssetId", request.PosterAssetId), ("mode", request.Mode),
+                ("region", request.Region)),
             request.IdempotencyKey,
             cancellationToken);
 
