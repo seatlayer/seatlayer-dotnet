@@ -4,6 +4,8 @@
 [![NuGet](https://img.shields.io/nuget/v/SeatLayer.svg)](https://www.nuget.org/packages/SeatLayer)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111827.svg)](LICENSE)
 
+SeatLayer is interactive seating chart software built for stadium scale. Platforms embed the white-label seat picker with their own checkout; organizers sell seated events on their own website with their own payment gateway.
+
 SeatLayer's official .NET server SDK is the **trusted side** of its reserved seating and seat
 booking API: inspect the holds a buyer created, price from server data, and book with a stable
 `bookingRef`. From C# you manage seating charts, events, sales channels, and live seat inventory
@@ -16,11 +18,15 @@ through one typed ticketing API client.
 [Server API reference](https://docs.seatlayer.io/server-api/events/)
 
 > **Server-side only.** This library authenticates with your secret key. Never ship it in a client
-> application — browser surfaces get short-lived, origin-bound tokens that you mint here.
+> application. Browser surfaces get short-lived, origin-bound tokens that you mint here.
+
+Two-step shape: the buyer picks and holds seats in the client with your public key, then this SDK confirms the booking from your server with your secret key while your platform keeps checkout and its own payment provider.
+
+**Start here:** [Quickstart](https://docs.seatlayer.io/start/quickstart/) · [Holds and checkout](https://docs.seatlayer.io/buyer-sdk/holds-and-checkout/) · [.NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/) · [SDK catalog](https://docs.seatlayer.io/sdk-catalog.json) · [Pricing](https://seatlayer.io/pricing/): $0 entry, 100 free confirmed-sold-seat credits per organization each month, then $0.10 down to $0.05 a credit, and credits never expire.
 
 ## Scale evidence
 
-SeatLayer is benchmarked on public 100,000-, 150,000- and 200,000-seat venue fixtures: 200,000 seats chart-ready in 1.95 s with 58 FPS zoom and 60 FPS pan in a desktop benchmark (15 September 2026). Fixtures, method, all runs and SHA-256 manifests: https://github.com/seatlayer/seatlayer-performance · Try the 53,018-seat live demo: https://app.seatlayer.io/demo/play/large-stadium
+Benchmarked on public 100,000-, 150,000- and 200,000-seat venue fixtures on 15 September 2026: 200,000 seats chart-ready in 1.95 s, desktop, local production build. Fixtures, method and run logs: https://github.com/seatlayer/seatlayer-performance. Live 200,000-seat stadium demo: https://app.seatlayer.io/demo/play/century-stadium-200k. This is renderer evidence, not a concurrent-buyer claim.
 
 ## Install the .NET seat booking SDK
 
