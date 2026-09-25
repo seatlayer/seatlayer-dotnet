@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0 (2026-09-10)
+
+- Added Event hosting regions: `Region` on the event create request, `defaultRegion` on workspace create, `UpdateDefaultRegionAsync`, and the `EventHostingRegions` constants. Events created without a region run in Western Europe.
+
 ## 0.7.0 — 2026-08-30
 
 - Added `Seasons`, covering all 48 frozen secret-key Season operations: compatibility and
