@@ -4,7 +4,7 @@
 [![NuGet](https://img.shields.io/nuget/v/SeatLayer.svg)](https://www.nuget.org/packages/SeatLayer)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111827.svg)](LICENSE)
 
-SeatLayer is interactive seating chart software built for stadium scale. Platforms embed the white-label seat picker with their own checkout; organizers sell seated events on their own website with their own payment gateway.
+The official .NET client for the SeatLayer API. The `SeatLayer` NuGet package lets a C# backend inspect seat holds, price orders from server data, book reserved seats and verify webhooks, with no package dependencies. SeatLayer is seating chart and reserved-seat ticketing software built for venues up to stadium scale.
 
 SeatLayer's official .NET server SDK is the **trusted side** of its reserved seating and seat
 booking API: inspect the holds a buyer created, price from server data, and book with a stable
@@ -40,7 +40,7 @@ Or pin it in your project file:
 <PackageReference Include="SeatLayer" Version="0.8.0" />
 ```
 
-`SeatLayer` is published on NuGet; `0.8.0` is the current release. Requires .NET 8 or newer. **No package dependencies** — `HttpClient`, `System.Text.Json` and
+`SeatLayer` is published on NuGet; `0.8.0` is the current release. Requires .NET 8 or newer. **No package dependencies**: `HttpClient`, `System.Text.Json` and
 `HMACSHA256` all ship with the framework, so the SDK forces no version on your application.
 
 ## Quick start
@@ -88,7 +88,7 @@ The hint is best effort, not a data-residency guarantee. See the
 [full Event region guide](https://docs.seatlayer.io/server-api/event-regions/).
 
 Register the client as a **singleton**. It is thread-safe, and its `HttpClient` is meant to be
-long-lived — constructing one per request exhausts sockets.
+long-lived: constructing one per request exhausts sockets.
 
 ```csharp
 builder.Services.AddSingleton(_ =>
@@ -111,7 +111,7 @@ browser `SeasonPicker` only the show-once, origin-bound buyer token.
 After the test hold/book/cancel journey and matching webhook deliveries,
 `ValidateSeasonBuyerRehearsalAsync(seasonKey)` sends no evidence body; SeatLayer discovers the
 retained chain automatically. Retrieved Season holds contain inventory identity, not an
-authoritative amount—your platform owns package price, payment, order, tax, refunds, benefits,
+authoritative amount. Your platform owns package price, payment, order, tax, refunds, benefits,
 and ticket or pass delivery.
 
 ```csharp
@@ -151,7 +151,7 @@ failing as a `401` three round-trips later.
 ## Book reserved seats from .NET
 
 **Buyer picks seats in the browser.** Your frontend holds them; your backend confirms the price and
-books. Never price from what the browser sent you — `RetrieveHoldAsync` is authoritative.
+books. Never price from what the browser sent you: `RetrieveHoldAsync` is authoritative.
 
 ```csharp
 var hold = await client.Inventory.RetrieveHoldAsync(eventKey, holdId);
@@ -174,7 +174,7 @@ await client.Inventory.BookAsync(eventKey, holdId, bookingRef: charge.Id);
 **Your backend picks the seats.** Phone orders, box office, comps.
 
 ```csharp
-// Payment already taken — book outright, so nothing is stranded if a second call fails.
+// Payment already taken: book outright, so nothing is stranded if a second call fails.
 await client.Inventory.BookBestAvailableAsync(eventKey,
     new BestAvailableRequest { Qty = 2, BookingRef = "phone-1183" });
 
@@ -220,7 +220,7 @@ should be accompanied by an audit `Reason`.
 ## Listing and pagination
 
 `ListAsync` returns one `Page` plus a cursor. `ListAllAsync` is an async stream that pages as you
-consume it — deliberately not a `List`, because the point of paginating is to *not* hold an
+consume it. It is deliberately not a `List`, because the point of paginating is to *not* hold an
 unbounded result set in memory.
 
 ```csharp
@@ -237,8 +237,8 @@ await foreach (var seatEvent in client.Events.ListAllAsync())
 ```
 
 Listing events includes live availability counts by default, which costs the server one round-trip
-**per event**. `ListAllAsync` drops them automatically — walking a whole catalogue is exactly when
-you don't want that — and you can control it explicitly:
+**per event**. `ListAllAsync` drops them automatically, since walking a whole catalogue is exactly when
+you don't want that, and you can control it explicitly:
 
 ```csharp
 await client.Events.ListAsync(new EventListRequest { Limit = 50, Counts = false });
@@ -246,7 +246,7 @@ await client.Events.ListAsync(new EventListRequest { Limit = 50, Counts = false 
 
 ## Keeping a hold alive
 
-When an order takes longer than the checkout window — an invoice, a phone sale — extend rather than
+When an order takes longer than the checkout window (an invoice, a phone sale), extend rather than
 release and re-hold. Releasing first hands the seats to whoever is racing for them in between.
 
 ```csharp
@@ -256,7 +256,7 @@ try
 }
 catch (SeatLayerConflictException)
 {
-    // Gone, expired, or at its renewal cap — the buyer has to re-pick.
+    // Gone, expired, or at its renewal cap: the buyer has to re-pick.
 }
 ```
 
@@ -303,7 +303,7 @@ app.MapPost("/webhooks/seatlayer", async (HttpRequest request) =>
     }
 
     // The signed body carries "at", but nothing enforces a freshness window, so a
-    // captured delivery stays valid indefinitely. Deduplicate on occurrenceId —
+    // captured delivery stays valid indefinitely. Deduplicate on occurrenceId:
     // this is your replay protection, not an optimisation.
     if (await AlreadyProcessedAsync((string)seatEvent["occurrenceId"]!))
     {
@@ -336,7 +336,7 @@ catch (SeatLayerAuthException e) when (e.IsModeMismatch)
 }
 ```
 
-`when` filters read especially well here — a sold-out result and a genuine conflict are the same
+`when` filters read especially well here: a sold-out result and a genuine conflict are the same
 exception type but different outcomes.
 
 | Type | Status | Means |
@@ -346,9 +346,9 @@ exception type but different outcomes.
 | `SeatLayerConflictException` | 409 | Inventory moved, or a guard rejected the change |
 | `SeatLayerValidationException` | 422 | Understood and rejected |
 | `SeatLayerRateLimitException` | 429 | Over budget; carries `RetryAfterSeconds` |
-| `SeatLayerConnectionException` | — | No answer: DNS, TLS, socket, timeout |
+| `SeatLayerConnectionException` | none | No answer: DNS, TLS, socket, timeout |
 
-Every API exception carries `Status`, `Code`, `Body` and `RequestId` — quote the request id in
+Every API exception carries `Status`, `Code`, `Body` and `RequestId`. Quote the request id in
 support requests.
 
 ## Reliability
@@ -416,7 +416,7 @@ Full reference: [SeatLayer .NET server SDK guide](https://docs.seatlayer.io/serv
 
 Install the [`SeatLayer` NuGet package](https://www.nuget.org/packages/SeatLayer), construct a
 `SeatLayerClient` with your secret key, and call `Inventory.BookAsync` with the hold id and a
-stable `bookingRef`. When your own backend picks the seats — phone orders, box office, comps —
+stable `bookingRef`. When your own backend picks the seats (phone orders, box office, comps),
 `Inventory.BookBestAvailableAsync` and `Inventory.BoxOfficeBookAsync` book outright with no prior
 hold. Every booking method requires a booking reference, so each sale is tied to an immutable
 order id you can reconcile against later.
@@ -436,7 +436,7 @@ retrieve it with `Inventory.RetrieveHoldAsync`, whose item-level price, quantity
 authoritative, and confirm it with `Inventory.BookAsync`. Use `Inventory.ExtendHoldAsync` for a long
 checkout instead of releasing and re-holding, which would hand the seats to whoever is racing for
 them. Booking is a single automatic attempt: after an unknown network outcome you may reconcile
-and repeat the exact same event, hold, and `bookingRef` — seats already booked under that
+and repeat the exact same event, hold, and `bookingRef`; seats already booked under that
 reference are not sold again.
 
 ### Can I use my own payment provider?
