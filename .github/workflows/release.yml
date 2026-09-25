@@ -1,15 +1,15 @@
 name: Release
 
 # Publishes to NuGet.org via Trusted Publishing (OIDC). No long-lived API key
-# exists in this repository, in Actions secrets, or in Doppler — NuGet/login
+# exists in this repository or in its Actions secrets. NuGet/login
 # exchanges the GitHub OIDC token for an API key that lives one hour.
 #
 # To release: push a tag matching <Version> in src/SeatLayer/SeatLayer.csproj.
 #
 #     git tag v0.1.0 && git push origin v0.1.0
 #
-# NUGET_USER is a repository variable (not a secret — it is a public profile
-# name), set with:
+# NUGET_USER is a repository variable (not a secret, because it is a public
+# profile name), set with:
 #   gh variable set NUGET_USER --repo seatlayer/seatlayer-dotnet --body '<name>'
 # It must be the nuget.org USERNAME, never the account's email address.
 
@@ -62,7 +62,7 @@ jobs:
 
           # Without the XML docs, IntelliSense is blank for every consumer.
           unzip -l "$pkg" | grep -q "lib/net8.0/SeatLayer.xml" \
-            || { echo "::error::missing XML docs — IntelliSense would be blank"; exit 1; }
+            || { echo "::error::missing XML docs, IntelliSense would be blank"; exit 1; }
 
           # The test project sets IsPackable=false. If that regressed we would be
           # shipping xunit to every consumer.
