@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-- `Seasons` grows from 48 to 86 operations: performances, package updates and prices, one-call
+- `Seasons` grows from 48 to 87 operations: performances, package updates and prices, one-call
   publishing, checkout tests, occurrence returns and reclaims, holders, Season order refunds and
   cancellations, hosted renewal links, contacts and notices, renewal quotes, intents and
   checkouts, sales and seat reports, holder and
-  order CSV exports, and bulk refunds with their jobs.
+  order CSV exports, bulk refunds and the release of lapsed renewal offers, with their jobs.
 - Added `Holders` (14 operations: customers, holder details and sessions, tickets, ticket
   transfers, returns, and renewals), `Orders` (9 operations: orders across events and Seasons, and an
   event's orders with refunds, cancellations, ticket emails, and CSV export), and `EventSeries`
@@ -14,7 +14,7 @@
 - Added `Holders.CreateHolderReturnAsync`: give back a holder's seat on one date, one per ticket.
 - `Events` gains 14 sales setup methods: buyer checkout choice, payment gateway, sales readiness,
   preflight and transitions, booking fee, and discount codes.
-- 26 of the new mutations use exact header replay, so 40 client mutations now retry with one
+- 27 of the new mutations use exact header replay, so 41 client mutations now retry with one
   stable `Idempotency-Key`. Unsupported operations, including the show-once renewal link rotation,
   stay single-attempt.
 - CSV exports return the raw text. `DeleteSeasonPlanAsync` and `DeleteEventDiscountCodeAsync`
@@ -44,6 +44,11 @@
 - Season holds, give-backs and date cancels can refuse with `performance_cancelled`, `refund_not_started` (503), `missing_manage_capability` (403) or `invalid_refund`; a holder's status can be `reserved`; hosted renewal readiness carries `missingPrices`.
 - `EventSeriesCreateRequest` takes `FromEventKey`: an event you already set up becomes the first date under its own key, and every other date is a copy of it. `Name` and `ChartKey` are no longer required; give them, or `FromEventKey` (an `ArgumentException` otherwise). It refuses with `404 event_not_found`, or `422 event_has_no_date`, `event_in_season`, `event_in_performance_group`, `event_in_series` or `invalid_request`.
 - Every date of an event series carries the series' plain name (`Hamlet`, not `Hamlet · 3 Nov`); tell dates apart by `startsAt`. `UpdateEventSeriesAsync` renames each date that carries the series name, and a series name cannot hold `{n}`, `{date}` or `{time}`.
+- Added `Seasons.ReleaseSeasonLapsedOffersAsync`: release the seats of every lapsed renewal offer as a job (`202 {job}`), with header replay. An offer extended before its turn is skipped and keeps its seat.
+- `Seasons.RetrieveSeasonHostedRenewalsAsync` and `Seasons.ListSeasonRenewalOffersAsync` page: new overloads take a `SeasonRenewalOfferPageRequest` (`Cursor` from the page's `nextCursor`, and `Limit`, 1-500 and 1-100). Both answers carry `nextCursor`, null on the last page, and a bad cursor or limit answers `400 invalid_cursor` or `invalid_limit`.
+- `CreateSeasonRenewalOffersAsync` answers `201 {offers}` for 100 contracts or fewer, and `202 {job, batchId}` above that: a `renewal_run` job makes the offers. Follow it with `RetrieveSeasonBulkJobAsync`, then page the offers with `ListSeasonRenewalOffersAsync`. It can refuse with `409 job_mismatch` or `503 season_not_configured`.
+- `CreateSeasonHolderImportFromSeasonAsync` answers `202 {job}` when a commit brings across more than 100 holders: a `holder_import` job, whose `summary` has the same counts when it completes. It can refuse with `409 job_mismatch`, `503 job_busy` or `503 season_not_configured`. A retrieved bulk job carries `summary`, empty until it completes.
+- `CreateSeasonRenewalNoticesAsync` takes up to 20,000 offer ids; more answers `422 too_many_offer_ids`.
 
 ## 0.8.0 (2026-09-10)
 

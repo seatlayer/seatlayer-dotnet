@@ -104,12 +104,13 @@ new SeatLayerClient(secretKey, new SeatLayerClientOptions { HttpClient = factory
 
 ## Fixed renewable Seasons
 
-`client.Seasons` exposes all 86 trusted organiser operations: the 48 from version `0.7.0`,
+`client.Seasons` exposes all 87 trusted organiser operations: the 48 from version `0.7.0`,
 plus performances, package prices (`SeasonPackagePrice.PriceTypeKey`: `adult`, `child`,
 `concession`, `senior` or `student`), publishing, checkout tests, occurrence returns, holders,
 Season orders, hosted renewal links and notices, renewal quotes, intents and checkouts, sales and
 seat reports with CSV exports, and the
-bulk refund of a cancelled date (`RefundSeasonPerformanceAsync`) with its jobs
+bulk refund of a cancelled date (`RefundSeasonPerformanceAsync`) and the release of lapsed
+renewal offers (`ReleaseSeasonLapsedOffersAsync`) with their jobs
 (`ListSeasonBulkJobsAsync`, `RetrieveSeasonBulkJobAsync`).
 Validate compatible events before creation, then keep the secret key on your server and give the
 browser `SeasonPicker` only the show-once, origin-bound buyer token.
@@ -135,8 +136,8 @@ var created = await client.Seasons.CreateSeasonAsync(new SeasonCreateRequest
 ```
 
 Season lifecycle, booking, cancellation, and renewal commits are domain-idempotent and therefore
-remain single-attempt. The 25 Season operations with exact header replay are retried; the full
-client has 40 exact-header-replay mutations.
+remain single-attempt. The 26 Season operations with exact header replay are retried; the full
+client has 41 exact-header-replay mutations.
 
 When SeatLayer takes the Season's payments, renew a holder with no hosted page: read the price,
 start a checkout, and send the holder to `payment.url`. For a renewal taken by phone or at the box
@@ -158,6 +159,13 @@ if (quote["problem"] is null)
 
 await client.Holders.DeclineHolderRenewalOfferAsync("holder_123", offerId, "Moving away");
 ```
+
+Renewal works at scale. Above 100 contracts, `CreateSeasonRenewalOffersAsync` answers
+`202 {job, batchId}` instead of `201 {offers}`, and a commit of more than 100 holders from
+`CreateSeasonHolderImportFromSeasonAsync` answers `202 {job}`: follow the job with
+`RetrieveSeasonBulkJobAsync`. `ListSeasonRenewalOffersAsync` and
+`RetrieveSeasonHostedRenewalsAsync` take a `SeasonRenewalOfferPageRequest` and answer a
+`nextCursor`, null on the last page.
 
 The three CSV exports (`Seasons.ExportSeasonHoldersCsvAsync`, `Seasons.ExportSeasonOrdersCsvAsync`
 and `Orders.ExportEventOrdersCsvAsync`) return the CSV as a raw string. `Seasons.DeleteSeasonPlanAsync`
@@ -391,11 +399,11 @@ support requests.
 ## Reliability
 
 **Retries.** Reads (`GET`/`HEAD`) retry 429, 408 and 5xx with exponential backoff and full jitter;
-`Retry-After` wins when the server sends it. 40 mutations use exact header replay:
+`Retry-After` wins when the server sends it. 41 mutations use exact header replay:
 
 - `Charts.CreateAsync`, `Charts.CopyAsync`, `Templates.InstantiateTemplateAsync`,
   `Events.CreateAsync`, `Workspaces.CreateAsync`, `PerformanceGroups.CreateAsync`
-- 25 on `Seasons`: `CreateSeasonAsync`, `UpdateSeasonAsync`, `DeleteSeasonAsync`,
+- 26 on `Seasons`: `CreateSeasonAsync`, `UpdateSeasonAsync`, `DeleteSeasonAsync`,
   `CreateSeasonPlanAsync`, `DuplicateSeasonToLiveAsync`, `CreateSeasonHolderImportAsync`,
   `CreateSeasonRenewalOffersAsync`, `CreateSeasonAmendmentAsync`,
   `CreateSeasonHolderImportFromSeasonAsync`, `CreateSeasonPerformancesAsync`,
@@ -403,8 +411,8 @@ support requests.
   `DeleteSeasonPlanAsync`, `PublishSeasonAsync`, `CreateSeasonCheckoutTestAsync`,
   `ReplaceSeasonPackagePricesAsync`, `AttachSeasonPlanPerformanceAsync`,
   `DeleteSeasonPlanPerformanceAsync`, `MarkSeasonPerformancePastAsync`, `RefundSeasonOrderAsync`,
-  `CancelSeasonOrderAsync`, `CancelSeasonOrderDateAsync`, `RefundSeasonPerformanceAsync`, and
-  `CreateSeasonRenewalCheckoutAsync`
+  `CancelSeasonOrderAsync`, `CancelSeasonOrderDateAsync`, `RefundSeasonPerformanceAsync`,
+  `CreateSeasonRenewalCheckoutAsync`, and `ReleaseSeasonLapsedOffersAsync`
 - `Holders.UpdateHolderAsync`, `Holders.CreateHolderTransferAsync`,
   `Holders.CreateHolderReturnAsync`, `Holders.CreateHolderRenewalCheckoutAsync`,
   `Orders.RefundEventOrderAsync`, and `Orders.CancelEventOrderAsync`
@@ -414,7 +422,7 @@ support requests.
 Other 4xx responses are never retried. A cancelled `CancellationToken` stops the loop immediately
 rather than being treated as a transient fault.
 
-**Idempotency.** Those 40 replay-backed operations carry an `Idempotency-Key`, generated when you
+**Idempotency.** Those 41 replay-backed operations carry an `Idempotency-Key`, generated when you
 do not supply one and reused across attempts. All remaining SDK mutations are single-attempt. Some
 have a server-side domain idempotency contract, but the SDK does not retry them automatically. This
 includes inventory holds and bookings, show-once credential or secret creation, unsupported

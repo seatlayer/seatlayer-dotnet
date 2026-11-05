@@ -562,6 +562,28 @@ public sealed class SeasonHolderListRequest : SeasonHolderFilterRequest
     }
 }
 
+/// <summary>
+/// Cursor paging for a Season's renewal offers, newest first: the offer list and the hosted
+/// renewal state.
+/// </summary>
+public sealed class SeasonRenewalOfferPageRequest
+{
+    /// <summary>The <c>nextCursor</c> of the page before.</summary>
+    public string? Cursor { get; set; }
+
+    /// <summary>
+    /// Offers a page: 1-100 for the offer list (default 100), 1-500 for the hosted renewal state
+    /// (default 500).
+    /// </summary>
+    public int? Limit { get; set; }
+
+    internal Dictionary<string, string?> ToQuery() => new()
+    {
+        ["cursor"] = Cursor,
+        ["limit"] = Limit?.ToString(),
+    };
+}
+
 /// <summary>Options for taking back one date of a Season order.</summary>
 public sealed class SeasonOrderDateCancelRequest
 {
@@ -903,7 +925,13 @@ public sealed class SeasonsService
         => _client.GetAsync(
             Path(seasonKey, $"/imports/{SeatLayerClient.Escape(importId)}"), null, cancellationToken);
 
-    /// <summary>Creates renewal offers with exact header replay.</summary>
+    /// <summary>
+    /// Creates renewal offers with exact header replay. For 100 contracts or fewer the offers are
+    /// made in this call: <c>201 {offers}</c>. Above 100, a <c>renewal_run</c> job makes them:
+    /// <c>202 {job, batchId}</c>. Follow the job with <see cref="RetrieveSeasonBulkJobAsync"/>, then
+    /// read the offers with <c>ListSeasonRenewalOffersAsync</c>; the same key answers the same job.
+    /// Refuses with <c>409 job_mismatch</c> or <c>503 season_not_configured</c>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateSeasonRenewalOffersAsync(
         string seasonKey, SeasonRenewalOffersCreateRequest request,
         CancellationToken cancellationToken = default)
@@ -916,10 +944,22 @@ public sealed class SeasonsService
             request.IdempotencyKey,
             cancellationToken);
 
-    /// <summary>Lists renewal offers.</summary>
+    /// <summary>Lists the first page of renewal offers, newest first (100 offers).</summary>
     public Task<IReadOnlyDictionary<string, object?>> ListSeasonRenewalOffersAsync(
         string seasonKey, CancellationToken cancellationToken = default)
-        => _client.GetAsync(Path(seasonKey, "/renewal-offers"), null, cancellationToken);
+        => ListSeasonRenewalOffersAsync(seasonKey, null, cancellationToken);
+
+    /// <summary>
+    /// Lists one page of renewal offers, newest first. Pass the page's <c>nextCursor</c> as
+    /// <c>Cursor</c> for the next; it is null on the last. <c>Limit</c> is 1-100 (default 100). A
+    /// cursor this list did not give out or a limit out of range answers
+    /// <c>400 invalid_cursor</c> or <c>400 invalid_limit</c>.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> ListSeasonRenewalOffersAsync(
+        string seasonKey, SeasonRenewalOfferPageRequest? request,
+        CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            Path(seasonKey, "/renewal-offers"), request?.ToQuery(), cancellationToken);
 
     /// <summary>Retrieves one renewal offer.</summary>
     public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonRenewalOfferAsync(
@@ -1072,6 +1112,11 @@ public sealed class SeasonsService
 
     /// <summary>
     /// Dry-runs or commits renewal rights derived from a previous Season's holders, with header replay.
+    /// A dry run answers <c>200 {import}</c>; a commit of 100 holders or fewer <c>201 {import}</c>.
+    /// A commit of more than 100 holders answers <c>202 {job}</c>: a <c>holder_import</c> job brings
+    /// them across. Follow it with <see cref="RetrieveSeasonBulkJobAsync"/>; its <c>summary</c> has
+    /// the same counts when it completes, and the same key answers the same job. Refuses with
+    /// <c>409 job_mismatch</c>, <c>503 job_busy</c> or <c>503 season_not_configured</c>.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateSeasonHolderImportFromSeasonAsync(
         string seasonKey, SeasonHolderImportFromSeasonRequest request,
@@ -1338,10 +1383,22 @@ public sealed class SeasonsService
             null,
             cancellationToken);
 
-    /// <summary>Retrieves renewal links, payments and emails per offer.</summary>
+    /// <summary>Retrieves renewal links, payments and emails for the first page of offers (500).</summary>
     public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonHostedRenewalsAsync(
         string seasonKey, CancellationToken cancellationToken = default)
-        => _client.GetAsync(Path(seasonKey, "/renewal-hosted"), null, cancellationToken);
+        => RetrieveSeasonHostedRenewalsAsync(seasonKey, null, cancellationToken);
+
+    /// <summary>
+    /// Retrieves renewal links, payments and emails for one page of offers, newest first. Pass the
+    /// page's <c>nextCursor</c> as <c>Cursor</c> for the next; it is null on the last. <c>Limit</c>
+    /// is 1-500 (default 500). A cursor this list did not give out or a limit out of range answers
+    /// <c>400 invalid_cursor</c> or <c>400 invalid_limit</c>.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonHostedRenewalsAsync(
+        string seasonKey, SeasonRenewalOfferPageRequest? request,
+        CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            Path(seasonKey, "/renewal-hosted"), request?.ToQuery(), cancellationToken);
 
     /// <summary>
     /// Makes a new renewal link for one holder; the old link stops working. Never retried: the
@@ -1367,7 +1424,8 @@ public sealed class SeasonsService
 
     /// <summary>
     /// Emails renewal invitations now and reminders before the deadline, for every offer or only
-    /// the listed ones.
+    /// the listed ones. At most 20,000 offer ids; more answers <c>422 too_many_offer_ids</c>. Leave
+    /// them out to email every open offer.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateSeasonRenewalNoticesAsync(
         string seasonKey, IEnumerable<string>? offerIds = null,
@@ -1466,12 +1524,26 @@ public sealed class SeasonsService
             request.IdempotencyKey,
             cancellationToken);
 
+    /// <summary>
+    /// Releases the seats of every lapsed renewal offer, as a job, with header replay: a retry with
+    /// the same key replays the same job. An offer extended before its turn is skipped and keeps its
+    /// seat. Answers <c>202 {job}</c>; follow it with <see cref="RetrieveSeasonBulkJobAsync"/>.
+    /// <c>503 job_busy</c> means another job holds the Season: send the same request again.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> ReleaseSeasonLapsedOffersAsync(
+        string seasonKey, string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            Path(seasonKey, "/renewal-offers/release-lapsed"), null, idempotencyKey, cancellationToken);
+
     /// <summary>Lists a Season's bulk jobs, newest first (100 at most).</summary>
     public Task<IReadOnlyDictionary<string, object?>> ListSeasonBulkJobsAsync(
         string seasonKey, CancellationToken cancellationToken = default)
         => _client.GetAsync(Path(seasonKey, "/jobs"), null, cancellationToken);
 
-    /// <summary>Retrieves one bulk job with its counts and up to 500 failed items.</summary>
+    /// <summary>
+    /// Retrieves one bulk job with its counts, up to 500 failed items, and the <c>summary</c> it
+    /// ended with (empty until it completes). Job kinds include <c>holder_import</c>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonBulkJobAsync(
         string seasonKey, string jobId, CancellationToken cancellationToken = default)
         => _client.GetAsync(

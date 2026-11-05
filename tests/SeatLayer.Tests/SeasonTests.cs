@@ -34,9 +34,9 @@ public class SeasonTests
     }
 
     [Fact]
-    public async Task MapsAll86SeasonOperationsAndExactReplayClasses()
+    public async Task MapsAll87SeasonOperationsAndExactReplayClasses()
     {
-        var (client, handler) = Build(Enumerable.Range(0, 86).Select(_ => Ok()));
+        var (client, handler) = Build(Enumerable.Range(0, 87).Select(_ => Ok()));
         var seasons = client.Seasons;
 
         await seasons.ListSeasonsAsync(new SeasonListRequest
@@ -239,6 +239,7 @@ public class SeasonTests
             ReturnUrl = "https://tickets.example/renewed", BuyerEmail = "ana@example.com",
             BuyerName = "Ana Silva", Provider = "stripe", IdempotencyKey = "renew-1",
         });
+        await seasons.ReleaseSeasonLapsedOffersAsync("sea/a");
 
         var expected = new (HttpMethod Method, string Url)[]
         {
@@ -328,9 +329,10 @@ public class SeasonTests
             (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/offer%2F1/quote"),
             (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/offer%2F1/intent"),
             (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/offer%2F1/checkout"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/release-lapsed"),
         };
 
-        Assert.Equal(86, handler.Calls.Count);
+        Assert.Equal(87, handler.Calls.Count);
         Assert.Null(handler.Calls[26].Body);
         Assert.Equal(expected.Length, handler.Calls.Count);
         for (var index = 0; index < expected.Length; index++)
@@ -348,9 +350,9 @@ public class SeasonTests
             [52] = "perf-delete-1", [53] = "plan-update-1", [54] = "plan-delete-1",
             [55] = null, [56] = null, [58] = "prices-1", [60] = "plan-perf-1",
             [61] = "plan-perf-2", [62] = "past-1", [66] = "refund-1", [67] = "cancel-order-1",
-            [68] = "cancel-date-1", [80] = "refund-date-1", [85] = "renew-1",
+            [68] = "cancel-date-1", [80] = "refund-date-1", [85] = "renew-1", [86] = null,
         };
-        Assert.Equal(25, replayKeys.Count);
+        Assert.Equal(26, replayKeys.Count);
         for (var index = 0; index < handler.Calls.Count; index++)
         {
             if (replayKeys.TryGetValue(index, out var key))
@@ -371,7 +373,7 @@ public class SeasonTests
             }
         }
 
-        // Bodies of the 38 operations added after the first 48. Null means no body at all.
+        // Bodies of the 39 operations added after the first 48. Null means no body at all.
         var bodies = new Dictionary<int, string?>
         {
             [48] = "{\"sourceSeasonId\":\"sea_2026\",\"successorPlanActivationId\":\"activation_3\",\"dryRun\":true}",
@@ -412,8 +414,9 @@ public class SeasonTests
             [83] = null,
             [84] = null,
             [85] = "{\"returnUrl\":\"https://tickets.example/renewed\",\"buyerEmail\":\"ana@example.com\",\"buyerName\":\"Ana Silva\",\"provider\":\"stripe\"}",
+            [86] = null,
         };
-        Assert.Equal(38, bodies.Count);
+        Assert.Equal(39, bodies.Count);
         foreach (var (index, body) in bodies)
         {
             if (body is null)
@@ -480,6 +483,117 @@ public class SeasonTests
         Assert.False(string.IsNullOrEmpty(keys[0]));
         Assert.Equal(keys[0], keys[1]);
         Assert.Equal(Canonical("{\"amount\":\"per_date\"}"), Canonical(handler.Calls[1].Body!));
+    }
+
+    [Fact]
+    public async Task LapsedOfferReleaseReplaysWithOneKeyAndSendsNoBody()
+    {
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            RateLimited(),
+            (HttpStatusCode.Accepted,
+                "{\"job\":{\"jobId\":\"sbj_1\",\"kind\":\"lapsed_release\",\"state\":\"planning\"}}",
+                new Dictionary<string, string>()),
+            RateLimited(),
+            Ok(),
+        }, maxRetries: 2);
+
+        var released = await client.Seasons.ReleaseSeasonLapsedOffersAsync("sea/a");
+        await client.Seasons.ReleaseSeasonLapsedOffersAsync("sea_1", "release-lapsed-1");
+
+        Assert.Equal(4, handler.Calls.Count);
+        Assert.All(handler.Calls, call => Assert.Equal(HttpMethod.Post, call.Method));
+        Assert.All(handler.Calls, call => Assert.Null(call.Body));
+        Assert.Equal(
+            "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/release-lapsed",
+            handler.Calls[0].Url.AbsoluteUri);
+        var keys = handler.Calls.Select(call => call.Headers.GetValues("Idempotency-Key").Single()).ToList();
+        Assert.False(string.IsNullOrEmpty(keys[0]));
+        Assert.Equal(keys[0], keys[1]);
+        Assert.Equal(new[] { "release-lapsed-1", "release-lapsed-1" }, keys.Skip(2));
+        var job = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(released["job"]);
+        Assert.Equal("lapsed_release", job["kind"]);
+    }
+
+    [Fact]
+    public async Task RenewalOfferListAndHostedRenewalsSendTheirPageQuery()
+    {
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            (HttpStatusCode.OK, "{\"offers\":[],\"truncated\":true,\"nextCursor\":\"c/2\"}",
+                new Dictionary<string, string>()),
+            Ok(),
+            (HttpStatusCode.OK, "{\"offers\":[],\"holdersWithoutEmail\":0,\"nextCursor\":null}",
+                new Dictionary<string, string>()),
+            Ok(),
+        });
+        var seasons = client.Seasons;
+
+        var offers = await seasons.ListSeasonRenewalOffersAsync(
+            "sea/a", new SeasonRenewalOfferPageRequest { Cursor = "c/1", Limit = 50 });
+        await seasons.ListSeasonRenewalOffersAsync("sea/a", new SeasonRenewalOfferPageRequest { Limit = 100 });
+        var hosted = await seasons.RetrieveSeasonHostedRenewalsAsync(
+            "sea/a", new SeasonRenewalOfferPageRequest { Cursor = "c/1", Limit = 500 });
+        await seasons.RetrieveSeasonHostedRenewalsAsync("sea/a", null);
+
+        Assert.Equal(
+            new[]
+            {
+                "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers?cursor=c%2f1&limit=50",
+                "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers?limit=100",
+                "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-hosted?cursor=c%2f1&limit=500",
+                "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-hosted",
+            },
+            handler.Calls.Select(call => call.Url.AbsoluteUri));
+        Assert.All(handler.Calls, call => Assert.Equal(HttpMethod.Get, call.Method));
+        Assert.Equal("c/2", offers["nextCursor"]);
+        Assert.True(hosted.ContainsKey("nextCursor"));
+        Assert.Null(hosted["nextCursor"]);
+    }
+
+    [Fact]
+    public async Task RenewalOffersAndBringAcrossAnswerAJobAboveOneHundred()
+    {
+        const string job = "{\"jobId\":\"sbj_1\",\"kind\":\"renewal_run\",\"state\":\"planning\","
+            + "\"counts\":{\"total\":250,\"done\":0,\"skipped\":0,\"failed\":0}}";
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            (HttpStatusCode.Accepted, "{\"job\":" + job + ",\"batchId\":\"srb_1\"}",
+                new Dictionary<string, string>()),
+            (HttpStatusCode.Created, "{\"offers\":[{\"offerId\":\"sro_1\"}]}", new Dictionary<string, string>()),
+            (HttpStatusCode.Accepted,
+                "{\"job\":{\"jobId\":\"sbj_2\",\"kind\":\"holder_import\",\"state\":\"planning\"}}",
+                new Dictionary<string, string>()),
+        });
+        var seasons = client.Seasons;
+
+        var queued = await seasons.CreateSeasonRenewalOffersAsync("sea_1", new SeasonRenewalOffersCreateRequest
+        {
+            DeadlineAt = 1_800_000_000_000, IdempotencyKey = "offers-big",
+        });
+        var made = await seasons.CreateSeasonRenewalOffersAsync("sea_1", new SeasonRenewalOffersCreateRequest
+        {
+            DeadlineAt = 1_800_000_000_000, IdempotencyKey = "offers-small",
+        });
+        var imported = await seasons.CreateSeasonHolderImportFromSeasonAsync(
+            "sea_1", new SeasonHolderImportFromSeasonRequest
+            {
+                SourceSeasonId = "sea_0", SuccessorPlanActivationId = "pa_1", IdempotencyKey = "bring-across",
+            });
+
+        var renewalRun = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(queued["job"]);
+        Assert.Equal("renewal_run", renewalRun["kind"]);
+        var counts = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(renewalRun["counts"]);
+        Assert.Equal(250L, counts["total"]);
+        Assert.Equal("srb_1", queued["batchId"]);
+        Assert.False(queued.ContainsKey("offers"));
+        Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<object?>>(made["offers"]));
+        Assert.False(made.ContainsKey("job"));
+        var holderImport = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(imported["job"]);
+        Assert.Equal("holder_import", holderImport["kind"]);
+        Assert.Equal(
+            new[] { "offers-big", "offers-small", "bring-across" },
+            handler.Calls.Select(call => call.Headers.GetValues("Idempotency-Key").Single()));
     }
 
     [Fact]
