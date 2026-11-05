@@ -104,9 +104,12 @@ new SeatLayerClient(secretKey, new SeatLayerClientOptions { HttpClient = factory
 
 ## Fixed renewable Seasons
 
-`client.Seasons` exposes all 80 trusted organiser operations: the 48 from version `0.7.0`,
-plus performances, package prices, publishing, checkout tests, occurrence returns, holders, Season
-orders, hosted renewal links and notices, and sales and seat reports with CSV exports.
+`client.Seasons` exposes all 83 trusted organiser operations: the 48 from version `0.7.0`,
+plus performances, package prices (`SeasonPackagePrice.PriceTypeKey`: `adult`, `child`,
+`concession`, `senior` or `student`), publishing, checkout tests, occurrence returns, holders,
+Season orders, hosted renewal links and notices, sales and seat reports with CSV exports, and the
+bulk refund of a cancelled date (`RefundSeasonPerformanceAsync`) with its jobs
+(`ListSeasonBulkJobsAsync`, `RetrieveSeasonBulkJobAsync`).
 Validate compatible events before creation, then keep the secret key on your server and give the
 browser `SeasonPicker` only the show-once, origin-bound buyer token.
 
@@ -131,14 +134,15 @@ var created = await client.Seasons.CreateSeasonAsync(new SeasonCreateRequest
 ```
 
 Season lifecycle, booking, cancellation, and renewal commits are domain-idempotent and therefore
-remain single-attempt. The 23 Season operations with exact header replay are retried; the full
-client has 37 exact-header-replay mutations.
+remain single-attempt. The 24 Season operations with exact header replay are retried; the full
+client has 38 exact-header-replay mutations.
 
 The three CSV exports (`Seasons.ExportSeasonHoldersCsvAsync`, `Seasons.ExportSeasonOrdersCsvAsync`
 and `Orders.ExportEventOrdersCsvAsync`) return the CSV as a raw string. `Seasons.DeleteSeasonPlanAsync`
 and `Events.DeleteEventDiscountCodeAsync` return a plain `Task`, because the API answers 204 with
 no body. On request types where a field can be cleared (`SeasonRenewalContactRequest`, `HolderUpdateRequest`,
-`EventPaymentGatewayReplaceRequest`, `EventDiscountCodeUpdateRequest`), assigning `null` sends
+`EventPaymentGatewayReplaceRequest`, `EventDiscountCodeUpdateRequest`, and the cutoffs on
+`SeasonUpdateRequest`), assigning `null` sends
 `null`, and leaving the property unassigned leaves the field out.
 
 ## Test vs live
@@ -253,6 +257,8 @@ you don't want that, and you can control it explicitly:
 await client.Events.ListAsync(new EventListRequest { Limit = 50, Counts = false });
 ```
 
+Set `SeriesKey` to list only the dates of one event series.
+
 ## Keeping a hold alive
 
 When an order takes longer than the checkout window (an invoice, a phone sale), extend rather than
@@ -363,11 +369,11 @@ support requests.
 ## Reliability
 
 **Retries.** Reads (`GET`/`HEAD`) retry 429, 408 and 5xx with exponential backoff and full jitter;
-`Retry-After` wins when the server sends it. 37 mutations use exact header replay:
+`Retry-After` wins when the server sends it. 38 mutations use exact header replay:
 
 - `Charts.CreateAsync`, `Charts.CopyAsync`, `Templates.InstantiateTemplateAsync`,
   `Events.CreateAsync`, `Workspaces.CreateAsync`, `PerformanceGroups.CreateAsync`
-- 23 on `Seasons`: `CreateSeasonAsync`, `UpdateSeasonAsync`, `DeleteSeasonAsync`,
+- 24 on `Seasons`: `CreateSeasonAsync`, `UpdateSeasonAsync`, `DeleteSeasonAsync`,
   `CreateSeasonPlanAsync`, `DuplicateSeasonToLiveAsync`, `CreateSeasonHolderImportAsync`,
   `CreateSeasonRenewalOffersAsync`, `CreateSeasonAmendmentAsync`,
   `CreateSeasonHolderImportFromSeasonAsync`, `CreateSeasonPerformancesAsync`,
@@ -375,7 +381,7 @@ support requests.
   `DeleteSeasonPlanAsync`, `PublishSeasonAsync`, `CreateSeasonCheckoutTestAsync`,
   `ReplaceSeasonPackagePricesAsync`, `AttachSeasonPlanPerformanceAsync`,
   `DeleteSeasonPlanPerformanceAsync`, `MarkSeasonPerformancePastAsync`, `RefundSeasonOrderAsync`,
-  `CancelSeasonOrderAsync`, and `CancelSeasonOrderDateAsync`
+  `CancelSeasonOrderAsync`, `CancelSeasonOrderDateAsync`, and `RefundSeasonPerformanceAsync`
 - `Holders.UpdateHolderAsync`, `Holders.CreateHolderTransferAsync`,
   `Holders.CreateHolderReturnAsync`, `Orders.RefundEventOrderAsync`, and
   `Orders.CancelEventOrderAsync`
@@ -385,7 +391,7 @@ support requests.
 Other 4xx responses are never retried. A cancelled `CancellationToken` stops the loop immediately
 rather than being treated as a transient fault.
 
-**Idempotency.** Those 37 replay-backed operations carry an `Idempotency-Key`, generated when you
+**Idempotency.** Those 38 replay-backed operations carry an `Idempotency-Key`, generated when you
 do not supply one and reused across attempts. All remaining SDK mutations are single-attempt. Some
 have a server-side domain idempotency contract, but the SDK does not retry them automatically. This
 includes inventory holds and bookings, show-once credential or secret creation, unsupported
@@ -432,7 +438,7 @@ payment gateway, sales readiness and state, the booking fee, and discount codes.
 | `Webhooks` | `ListAsync` `CreateAsync` `UpdateAsync` `DeleteAsync` `ListDeliveriesAsync` |
 | `Workspaces` | `ListAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` |
 | `PerformanceGroups` | `ListAsync` `CreateAsync` `RetrieveAsync` `DeleteAsync` `ActivateAsync` `CloseAsync` `RetrieveLifecycleAsync` `CreateBuyerAccessSessionAsync` `ListBuyerAccessSessionsAsync` `RevokeBuyerAccessSessionAsync` `RetrieveHoldAsync` `BookHoldAsync` `RetrieveBookingAsync` |
-| `Seasons` | 80 operations for catalogue and Plan lifecycle, performances and package prices, publishing and checkout tests, sales windows, buyer access and booking, holder imports, holders and Season orders, renewals and hosted renewal links, occurrence amendments, returns and reclaims, reports and CSV exports, audit, outbox, and support export |
+| `Seasons` | 83 operations for catalogue and Plan lifecycle, performances and package prices, publishing and checkout tests, sales windows, buyer access and booking, holder imports, holders and Season orders, renewals and hosted renewal links, occurrence amendments, returns and reclaims, bulk refunds and jobs, reports and CSV exports, audit, outbox, and support export |
 
 Full reference: [SeatLayer .NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/)
 

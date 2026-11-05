@@ -34,9 +34,9 @@ public class SeasonTests
     }
 
     [Fact]
-    public async Task MapsAll80SeasonOperationsAndExactReplayClasses()
+    public async Task MapsAll83SeasonOperationsAndExactReplayClasses()
     {
-        var (client, handler) = Build(Enumerable.Range(0, 80).Select(_ => Ok()));
+        var (client, handler) = Build(Enumerable.Range(0, 83).Select(_ => Ok()));
         var seasons = client.Seasons;
 
         await seasons.ListSeasonsAsync(new SeasonListRequest
@@ -226,6 +226,12 @@ public class SeasonTests
             "sea/a", new SeasonHolderFilterRequest { Query = "smith", Status = "active" });
         await seasons.ExportSeasonOrdersCsvAsync("sea/a");
         await seasons.RetrieveSeasonSeatCountsAsync("sea/a");
+        await seasons.RefundSeasonPerformanceAsync("sea/a", "ev/7", new SeasonPerformanceRefundRequest
+        {
+            Amount = "per_date", Reason = "Storm", IdempotencyKey = "refund-date-1",
+        });
+        await seasons.ListSeasonBulkJobsAsync("sea/a");
+        await seasons.RetrieveSeasonBulkJobAsync("sea/a", "job/1");
 
         var expected = new (HttpMethod Method, string Url)[]
         {
@@ -309,9 +315,12 @@ public class SeasonTests
             (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/reports/holders.csv?q=smith&status=active"),
             (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/reports/orders.csv"),
             (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/seat-counts"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/performances/ev%2F7/refunds"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/jobs"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/jobs/job%2F1"),
         };
 
-        Assert.Equal(80, handler.Calls.Count);
+        Assert.Equal(83, handler.Calls.Count);
         Assert.Null(handler.Calls[26].Body);
         Assert.Equal(expected.Length, handler.Calls.Count);
         for (var index = 0; index < expected.Length; index++)
@@ -329,9 +338,9 @@ public class SeasonTests
             [52] = "perf-delete-1", [53] = "plan-update-1", [54] = "plan-delete-1",
             [55] = null, [56] = null, [58] = "prices-1", [60] = "plan-perf-1",
             [61] = "plan-perf-2", [62] = "past-1", [66] = "refund-1", [67] = "cancel-order-1",
-            [68] = "cancel-date-1",
+            [68] = "cancel-date-1", [80] = "refund-date-1",
         };
-        Assert.Equal(23, replayKeys.Count);
+        Assert.Equal(24, replayKeys.Count);
         for (var index = 0; index < handler.Calls.Count; index++)
         {
             if (replayKeys.TryGetValue(index, out var key))
@@ -352,7 +361,7 @@ public class SeasonTests
             }
         }
 
-        // Bodies of the 32 operations added after the first 48. Null means no body at all.
+        // Bodies of the 35 operations added after the first 48. Null means no body at all.
         var bodies = new Dictionary<int, string?>
         {
             [48] = "{\"sourceSeasonId\":\"sea_2026\",\"successorPlanActivationId\":\"activation_3\",\"dryRun\":true}",
@@ -387,8 +396,11 @@ public class SeasonTests
             [77] = null,
             [78] = null,
             [79] = null,
+            [80] = "{\"amount\":\"per_date\",\"reason\":\"Storm\"}",
+            [81] = null,
+            [82] = null,
         };
-        Assert.Equal(32, bodies.Count);
+        Assert.Equal(35, bodies.Count);
         foreach (var (index, body) in bodies)
         {
             if (body is null)
@@ -440,6 +452,83 @@ public class SeasonTests
         var keys = handler.Calls.Select(call => call.Headers.GetValues("Idempotency-Key").Single()).ToList();
         Assert.False(string.IsNullOrEmpty(keys[0]));
         Assert.Equal(keys[0], keys[1]);
+    }
+
+    [Fact]
+    public async Task BulkRefundOfADateReplaysWithOneGeneratedKey()
+    {
+        var (client, handler) = Build(new[] { RateLimited(), Ok() }, maxRetries: 2);
+
+        await client.Seasons.RefundSeasonPerformanceAsync(
+            "sea_1", "ev_1", new SeasonPerformanceRefundRequest { Amount = "full" });
+
+        Assert.Equal(2, handler.Calls.Count);
+        var keys = handler.Calls.Select(call => call.Headers.GetValues("Idempotency-Key").Single()).ToList();
+        Assert.False(string.IsNullOrEmpty(keys[0]));
+        Assert.Equal(keys[0], keys[1]);
+        Assert.Equal(Canonical("{\"amount\":\"full\"}"), Canonical(handler.Calls[1].Body!));
+    }
+
+    [Fact]
+    public async Task PriceTypesSaleSettingsHolderContactsAndDateCancelsReachTheWire()
+    {
+        var (client, handler) = Build(Enumerable.Range(0, 6).Select(_ => Ok()));
+        var seasons = client.Seasons;
+
+        await seasons.ReplaceSeasonPackagePricesAsync("sea_1", "plan_1", new SeasonPackagePricesRequest
+        {
+            Prices = new[]
+            {
+                new SeasonPackagePrice { CategoryKey = "stalls", UnitPrice = 18000 },
+                new SeasonPackagePrice { CategoryKey = "stalls", PriceTypeKey = "child", UnitPrice = 9000 },
+            },
+        });
+        await seasons.UpdateSeasonAsync("sea_1", new SeasonUpdateRequest
+        {
+            ExpectedRevision = 3, CheckoutMode = "seatlayer", TransferCutoffHours = 24, ReturnCutoffHours = null,
+        });
+        await seasons.UpdateSeasonAsync("sea_1", new SeasonUpdateRequest { ExpectedRevision = 4, Name = "Renamed" });
+        await seasons.CreateSeasonHolderImportAsync("sea_1", new SeasonHolderImportRequest
+        {
+            SuccessorPlanActivationId = "pa_1",
+            Rows = new[]
+            {
+                new SeasonHolderImportRow
+                {
+                    RowId = "r1", HolderRef = "h1", PriorPlanActivationId = "pa_0", PriorContractRef = "c1",
+                    Labels = new[] { "A-1" }, ExistingBookingRef = "b1",
+                    HolderEmail = "ana@example.com", HolderName = "Ana Silva",
+                },
+            },
+        });
+        await seasons.CreateSeasonAmendmentAsync("sea_1", new SeasonAmendmentCreateRequest
+        {
+            EventKey = "ev_night_3", Kind = "cancel", Refund = "per_date", Reason = "Storm",
+            IdempotencyKey = "night-3-storm",
+        });
+        await seasons.CreateSeasonAmendmentAsync(
+            "sea_1", new SeasonAmendmentCreateRequest { EventKey = "ev_1", Kind = "postpone" });
+
+        var bodies = new[]
+        {
+            "{\"prices\":[{\"categoryKey\":\"stalls\",\"unitPrice\":18000},"
+                + "{\"categoryKey\":\"stalls\",\"priceTypeKey\":\"child\",\"unitPrice\":9000}]}",
+            "{\"expectedRevision\":3,\"checkoutMode\":\"seatlayer\",\"transferCutoffHours\":24,"
+                + "\"returnCutoffHours\":null}",
+            "{\"expectedRevision\":4,\"name\":\"Renamed\"}",
+            "{\"successorPlanActivationId\":\"pa_1\",\"rows\":[{\"rowId\":\"r1\",\"holderRef\":\"h1\","
+                + "\"priorPlanActivationId\":\"pa_0\",\"priorContractRef\":\"c1\",\"labels\":[\"A-1\"],"
+                + "\"existingBookingRef\":\"b1\",\"holderEmail\":\"ana@example.com\",\"holderName\":\"Ana Silva\"}]}",
+            "{\"eventKey\":\"ev_night_3\",\"kind\":\"cancel\",\"refund\":\"per_date\",\"reason\":\"Storm\"}",
+            "{\"eventKey\":\"ev_1\",\"kind\":\"postpone\"}",
+        };
+        Assert.Equal(bodies.Length, handler.Calls.Count);
+        for (var index = 0; index < bodies.Length; index++)
+        {
+            Assert.Equal(Canonical(bodies[index]), Canonical(handler.Calls[index].Body!));
+        }
+
+        Assert.Equal("night-3-storm", handler.Calls[4].Headers.GetValues("Idempotency-Key").Single());
     }
 
     [Fact]

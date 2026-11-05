@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- `Seasons` grows from 48 to 80 operations: performances, package updates and prices, one-call
+- `Seasons` grows from 48 to 83 operations: performances, package updates and prices, one-call
   publishing, checkout tests, occurrence returns and reclaims, holders, Season order refunds and
-  cancellations, hosted renewal links, contacts and notices, sales and seat reports, and holder
-  and order CSV exports.
+  cancellations, hosted renewal links, contacts and notices, sales and seat reports, holder and
+  order CSV exports, and bulk refunds with their jobs.
 - Added `Holders` (12 operations: customers, holder details and sessions, tickets, ticket
   transfers, and returns), `Orders` (9 operations: orders across events and Seasons, and an
   event's orders with refunds, cancellations, ticket emails, and CSV export), and `EventSeries`
@@ -13,11 +13,22 @@
 - Added `Holders.CreateHolderReturnAsync`: give back a holder's seat on one date, one per ticket.
 - `Events` gains 14 sales setup methods: buyer checkout choice, payment gateway, sales readiness,
   preflight and transitions, booking fee, and discount codes.
-- 23 of the new mutations use exact header replay, so 37 client mutations now retry with one
+- 24 of the new mutations use exact header replay, so 38 client mutations now retry with one
   stable `Idempotency-Key`. Unsupported operations, including the show-once renewal link rotation,
   stay single-attempt.
 - CSV exports return the raw text. `DeleteSeasonPlanAsync` and `DeleteEventDiscountCodeAsync`
   return a plain `Task` for the API's 204.
+- Added `Seasons.RefundSeasonPerformanceAsync` (refund every order of a cancelled date as a job,
+  with header replay; `SeasonPerformanceRefundRequest`), `Seasons.ListSeasonBulkJobsAsync`, and
+  `Seasons.RetrieveSeasonBulkJobAsync`.
+- `SeasonPackagePrice` takes `PriceTypeKey` (`adult`, `child`, `concession`, `senior`,
+  `student`), left out when null.
+- `SeasonAmendmentCreateRequest` takes `Refund` and `Reason`, for the new `postpone` and `cancel`
+  kinds.
+- `SeasonUpdateRequest` takes `CheckoutMode`, `TransferCutoffHours`, and `ReturnCutoffHours`; an
+  assigned null cutoff is sent as null.
+- `SeasonHolderImportRow` takes `HolderEmail` and `HolderName`, left out when null.
+- `EventListRequest` takes `SeriesKey` to list one event series' dates.
 
 ## 0.8.0 (2026-09-10)
 

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SeatLayer;
 
 /// <summary>Events or activated Performance Groups selected for a Season.</summary>
@@ -59,8 +61,68 @@ public sealed class SeasonUpdateRequest
     /// <summary>Replacement edition, when supplied.</summary>
     public string? Edition { get; set; }
 
+    /// <summary>
+    /// Who takes the money: <c>seatlayer</c> or <c>server</c>. Left out when null; it cannot go
+    /// back to undecided, and it is fixed once a live booking exists.
+    /// </summary>
+    public string? CheckoutMode { get; set; }
+
+    /// <summary>
+    /// Hours (0 to 720) before a date starts that its tickets stop being sent to others. Left out
+    /// when unassigned; assign null to send null, which means until the date starts.
+    /// </summary>
+    public int? TransferCutoffHours
+    {
+        get => _transferCutoffHours;
+        set
+        {
+            _transferCutoffHours = value;
+            _transferCutoffHoursSet = true;
+        }
+    }
+
+    /// <summary>
+    /// Hours (0 to 720) before a date starts that a holder can no longer give a seat back. Left out
+    /// when unassigned; assign null to send null, which means until the date starts.
+    /// </summary>
+    public int? ReturnCutoffHours
+    {
+        get => _returnCutoffHours;
+        set
+        {
+            _returnCutoffHours = value;
+            _returnCutoffHoursSet = true;
+        }
+    }
+
     /// <summary>Optional key for exact server response replay.</summary>
     public string? IdempotencyKey { get; set; }
+
+    private int? _transferCutoffHours;
+    private int? _returnCutoffHours;
+    private bool _transferCutoffHoursSet;
+    private bool _returnCutoffHoursSet;
+
+    internal Dictionary<string, object?> ToBody()
+    {
+        var body = Body.Of(
+            ("expectedRevision", ExpectedRevision),
+            ("name", Name),
+            ("edition", Edition),
+            ("checkoutMode", CheckoutMode));
+        // Body.Of drops nulls, but an assigned null cutoff means "until the date starts".
+        if (_transferCutoffHoursSet)
+        {
+            body["transferCutoffHours"] = _transferCutoffHours;
+        }
+
+        if (_returnCutoffHoursSet)
+        {
+            body["returnCutoffHours"] = _returnCutoffHours;
+        }
+
+        return body;
+    }
 }
 
 /// <summary>Creates a publishable plan within a Season.</summary>
@@ -151,6 +213,14 @@ public sealed class SeasonHolderImportRow
 
     /// <summary>Existing booking reference, when one exists.</summary>
     public string? ExistingBookingRef { get; set; }
+
+    /// <summary>Where the holder's renewal emails go. Left out when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HolderEmail { get; set; }
+
+    /// <summary>The holder's name on renewal emails. Left out when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HolderName { get; set; }
 }
 
 /// <summary>Imports incumbent holders into a successor plan.</summary>
@@ -207,7 +277,10 @@ public sealed class SeasonAmendmentCreateRequest
     /// <summary>Occurrence event key.</summary>
     public required string EventKey { get; set; }
 
-    /// <summary><c>reschedule</c>, <c>replace</c>, or <c>cancel_exception</c>.</summary>
+    /// <summary>
+    /// <c>reschedule</c>, <c>replace</c>, <c>cancel_exception</c>, <c>postpone</c> (the date stays
+    /// with no new time yet), or <c>cancel</c> (the date will not happen).
+    /// </summary>
     public required string Kind { get; set; }
 
     /// <summary>Replacement start time in epoch milliseconds.</summary>
@@ -215,6 +288,15 @@ public sealed class SeasonAmendmentCreateRequest
 
     /// <summary>Replacement occurrence name.</summary>
     public string? Name { get; set; }
+
+    /// <summary>
+    /// With <c>cancel</c> only: refund the date's SeatLayer orders as a job. <c>none</c> (the
+    /// default), <c>per_date</c>, or <c>full</c>.
+    /// </summary>
+    public string? Refund { get; set; }
+
+    /// <summary>Kept on the refund job.</summary>
+    public string? Reason { get; set; }
 
     /// <summary>Optional key for exact server response replay.</summary>
     public string? IdempotencyKey { get; set; }
@@ -327,6 +409,13 @@ public sealed class SeasonPackagePrice
 {
     /// <summary>Chart category key.</summary>
     public required string CategoryKey { get; set; }
+
+    /// <summary>
+    /// <c>adult</c>, <c>child</c>, <c>concession</c>, <c>senior</c>, or <c>student</c>. Left out
+    /// when null, which prices the category for adults. Each category takes each type once.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PriceTypeKey { get; set; }
 
     /// <summary>Package price in minor currency units.</summary>
     public required long UnitPrice { get; set; }
@@ -446,6 +535,22 @@ public sealed class SeasonOrderDateCancelRequest
     public string? IdempotencyKey { get; set; }
 }
 
+/// <summary>Refunds every SeatLayer order holding a cancelled date, as a job.</summary>
+public sealed class SeasonPerformanceRefundRequest
+{
+    /// <summary>
+    /// <c>per_date</c> (the date's share of each order, rounded down) or <c>full</c> (what is left
+    /// of each order).
+    /// </summary>
+    public required string Amount { get; set; }
+
+    /// <summary>Kept on the job.</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>Optional key for exact server response replay.</summary>
+    public string? IdempotencyKey { get; set; }
+}
+
 /// <summary>
 /// The name and email a renewal offer is sent to. Assign null to clear a field; leave a field
 /// unassigned to keep its current value.
@@ -551,16 +656,16 @@ public sealed class SeasonsService
         string seasonKey, CancellationToken cancellationToken = default)
         => _client.GetAsync(Path(seasonKey), null, cancellationToken);
 
-    /// <summary>Updates Season identity fields with compare-and-set and header replay.</summary>
+    /// <summary>
+    /// Updates Season identity fields, checkout mode, and transfer and return cutoffs with
+    /// compare-and-set and header replay.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> UpdateSeasonAsync(
         string seasonKey, SeasonUpdateRequest request, CancellationToken cancellationToken = default)
         => _client.MutationWithHeaderReplayAsync(
             HttpMethod.Patch,
             Path(seasonKey),
-            Body.Of(
-                ("expectedRevision", request.ExpectedRevision),
-                ("name", request.Name),
-                ("edition", request.Edition)),
+            request.ToBody(),
             request.IdempotencyKey,
             cancellationToken);
 
@@ -847,7 +952,9 @@ public sealed class SeasonsService
                 ("eventKey", request.EventKey),
                 ("kind", request.Kind),
                 ("startsAt", request.StartsAt),
-                ("name", request.Name)),
+                ("name", request.Name),
+                ("refund", request.Refund),
+                ("reason", request.Reason)),
             request.IdempotencyKey,
             cancellationToken);
 
@@ -1037,7 +1144,10 @@ public sealed class SeasonsService
             request.IdempotencyKey,
             cancellationToken);
 
-    /// <summary>Lists every package price table for a Season.</summary>
+    /// <summary>
+    /// Lists every package price table for a Season. Each price carries its <c>priceTypeKey</c>
+    /// and <c>priceTypeLabel</c>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> ListSeasonPricesAsync(
         string seasonKey, CancellationToken cancellationToken = default)
         => _client.GetAsync(Path(seasonKey, "/prices"), null, cancellationToken);
@@ -1251,6 +1361,31 @@ public sealed class SeasonsService
     public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonSeatCountsAsync(
         string seasonKey, CancellationToken cancellationToken = default)
         => _client.GetAsync(Path(seasonKey, "/seat-counts"), null, cancellationToken);
+
+    /// <summary>
+    /// Refunds every SeatLayer order holding a cancelled date, as a job, with header replay: a
+    /// retry with the same key replays the same job. Follow it with
+    /// <see cref="RetrieveSeasonBulkJobAsync"/>.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> RefundSeasonPerformanceAsync(
+        string seasonKey, string eventKey, SeasonPerformanceRefundRequest request,
+        CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            Path(seasonKey, $"/performances/{SeatLayerClient.Escape(eventKey)}/refunds"),
+            Body.Of(("amount", request.Amount), ("reason", request.Reason)),
+            request.IdempotencyKey,
+            cancellationToken);
+
+    /// <summary>Lists a Season's bulk jobs, newest first (100 at most).</summary>
+    public Task<IReadOnlyDictionary<string, object?>> ListSeasonBulkJobsAsync(
+        string seasonKey, CancellationToken cancellationToken = default)
+        => _client.GetAsync(Path(seasonKey, "/jobs"), null, cancellationToken);
+
+    /// <summary>Retrieves one bulk job with its counts and up to 500 failed items.</summary>
+    public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonBulkJobAsync(
+        string seasonKey, string jobId, CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            Path(seasonKey, $"/jobs/{SeatLayerClient.Escape(jobId)}"), null, cancellationToken);
 
     private Task<IReadOnlyDictionary<string, object?>> LifecycleAsync(
         string seasonKey, string action, long expectedRevision, CancellationToken cancellationToken)

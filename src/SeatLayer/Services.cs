@@ -294,6 +294,9 @@ public sealed class EventListRequest
     /// </summary>
     public bool Counts { get; set; } = true;
 
+    /// <summary>Only the dates of this event series.</summary>
+    public string? SeriesKey { get; set; }
+
     internal Dictionary<string, string?> ToQuery()
     {
         var query = new Dictionary<string, string?>
@@ -308,6 +311,7 @@ public sealed class EventListRequest
             query["counts"] = "0";
         }
 
+        query["seriesKey"] = SeriesKey;
         return query;
     }
 }
