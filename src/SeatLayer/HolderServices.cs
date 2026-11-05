@@ -122,9 +122,19 @@ public sealed class HolderTransferCreateRequest
     public string? IdempotencyKey { get; set; }
 }
 
+/// <summary>Gives back a holder's seat on one date, one per ticket.</summary>
+public sealed class HolderReturnCreateRequest
+{
+    /// <summary>Tickets to give back: 1 to 20, all of one Season. Each is one seat on one date.</summary>
+    public required IEnumerable<string> TicketIds { get; set; }
+
+    /// <summary>Optional key for exact server response replay.</summary>
+    public string? IdempotencyKey { get; set; }
+}
+
 /// <summary>
 /// Season ticket holders: the customer behind a holder reference, their Seasons and tickets,
-/// ticket transfers, and the customer list.
+/// ticket transfers and returns, and the customer list.
 /// </summary>
 /// <remarks>
 /// A holder reference is your own reference, as your imports and bookings carry it; a hosted
@@ -215,5 +225,18 @@ public sealed class HoldersService
             Path(holderRef, $"/transfers/{SeatLayerClient.Escape(transferId)}/accept"),
             null,
             null,
+            cancellationToken);
+
+    /// <summary>
+    /// Gives back a holder's seat on one date, one per ticket, with header replay. A repeat
+    /// answers with the same return.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> CreateHolderReturnAsync(
+        string holderRef, HolderReturnCreateRequest request,
+        CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            Path(holderRef, "/returns"),
+            Body.Of(("ticketIds", request.TicketIds.ToList())),
+            request.IdempotencyKey,
             cancellationToken);
 }

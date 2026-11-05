@@ -30,6 +30,9 @@ public class SalesOperationTests
     private static (HttpStatusCode, string, IDictionary<string, string>) Ok(string body = "{}")
         => (HttpStatusCode.OK, body, new Dictionary<string, string>());
 
+    private static (HttpStatusCode, string, IDictionary<string, string>) Created(string body)
+        => (HttpStatusCode.Created, body, new Dictionary<string, string>());
+
     private static (HttpStatusCode, string, IDictionary<string, string>) RateLimited()
         => ((HttpStatusCode)429, "{\"error\":\"rate_limited\"}",
             new Dictionary<string, string> { ["Retry-After"] = "0" });
@@ -80,9 +83,9 @@ public class SalesOperationTests
     }
 
     [Fact]
-    public async Task HoldersMapAll11Operations()
+    public async Task HoldersMapAll12Operations()
     {
-        var (client, handler) = Build(Enumerable.Range(0, 11).Select(_ => Ok()));
+        var (client, handler) = Build(Enumerable.Range(0, 12).Select(_ => Ok()));
         var holders = client.Holders;
 
         await holders.ListCustomersAsync(new CustomerListRequest
@@ -108,8 +111,12 @@ public class SalesOperationTests
         await holders.ListHolderTransfersAsync("h/1");
         await holders.CancelHolderTransferAsync("h/1", "tr/1");
         await holders.AcceptHolderTransferAsync("h/1", "tr/1");
+        await holders.CreateHolderReturnAsync("h/1", new HolderReturnCreateRequest
+        {
+            TicketIds = new[] { "tkt_0123456789abcdef01234567" }, IdempotencyKey = "return-1",
+        });
 
-        Assert.Equal(11, handler.Calls.Count);
+        Assert.Equal(12, handler.Calls.Count);
         const string holder = "https://api.seatlayer.io/v1/holders/h%2F1";
         AssertCall(handler, 0, HttpMethod.Get,
             "https://api.seatlayer.io/v1/customers?email=fan%40example.com&holderRef=h%2f1&cursor=c%2f1&limit=10",
@@ -128,6 +135,8 @@ public class SalesOperationTests
         AssertCall(handler, 8, HttpMethod.Get, holder + "/transfers", null, null);
         AssertCall(handler, 9, HttpMethod.Post, holder + "/transfers/tr%2F1/cancel", null, null);
         AssertCall(handler, 10, HttpMethod.Post, holder + "/transfers/tr%2F1/accept", null, null);
+        AssertCall(handler, 11, HttpMethod.Post, holder + "/returns",
+            "{\"ticketIds\":[\"tkt_0123456789abcdef01234567\"]}", "return-1");
     }
 
     [Fact]
@@ -352,5 +361,31 @@ public class SalesOperationTests
         Assert.All(
             handler.Calls,
             call => Assert.Equal("refund-7", call.Headers.GetValues("Idempotency-Key").Single()));
+    }
+
+    [Fact]
+    public async Task HolderReturnReplaysWithOneGeneratedKey()
+    {
+        const string created =
+            "{\"return\":{\"returnId\":\"ret_1\",\"state\":\"returned\",\"seasonKey\":\"sea_1\","
+            + "\"tickets\":[],\"createdAt\":1}}";
+        var (client, handler) = Build(new[] { RateLimited(), Created(created) }, maxRetries: 2);
+
+        var result = await client.Holders.CreateHolderReturnAsync("a/b", new HolderReturnCreateRequest
+        {
+            TicketIds = new[] { "tkt_0123456789abcdef01234567" },
+        });
+
+        Assert.Contains("return", result);
+        Assert.Equal(2, handler.Calls.Count);
+        for (var index = 0; index < 2; index++)
+        {
+            AssertCall(handler, index, HttpMethod.Post, "https://api.seatlayer.io/v1/holders/a%2Fb/returns",
+                "{\"ticketIds\":[\"tkt_0123456789abcdef01234567\"]}", Generated);
+        }
+
+        Assert.Equal(
+            handler.Calls[0].Headers.GetValues("Idempotency-Key").Single(),
+            handler.Calls[1].Headers.GetValues("Idempotency-Key").Single());
     }
 }
