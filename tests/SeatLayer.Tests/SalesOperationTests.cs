@@ -163,7 +163,7 @@ public class SalesOperationTests
 
         await orders.ListOrdersAsync(new OrderListRequest
         {
-            EventKey = "ev/1", SeasonKey = "sea/a", Status = "paid", From = 1, To = 2,
+            EventKey = "ev/1", SeasonKey = "sea/a", HolderRef = "ord/1", Status = "paid", From = 1, To = 2,
             Cursor = "c/1", Limit = 20,
         });
         await orders.RetrieveOrderAsync("ord/1");
@@ -189,7 +189,7 @@ public class SalesOperationTests
         const string order = "https://api.seatlayer.io/v1/orders/ord%2F1";
         const string eventOrder = "https://api.seatlayer.io/v1/events/ev%2F1/orders/ord%2F1";
         AssertCall(handler, 0, HttpMethod.Get,
-            "https://api.seatlayer.io/v1/orders?eventKey=ev%2f1&seasonKey=sea%2fa&status=paid&from=1&to=2&cursor=c%2f1&limit=20",
+            "https://api.seatlayer.io/v1/orders?eventKey=ev%2f1&seasonKey=sea%2fa&holderRef=ord%2f1&status=paid&from=1&to=2&cursor=c%2f1&limit=20",
             null, null);
         AssertCall(handler, 1, HttpMethod.Get, order, null, null);
         AssertCall(handler, 2, HttpMethod.Get, order + "/tickets", null, null);
@@ -274,7 +274,7 @@ public class SalesOperationTests
     [Fact]
     public async Task EventSeriesMapAll5OperationsWithHeaderReplay()
     {
-        var (client, handler) = Build(Enumerable.Range(0, 5).Select(_ => Ok()));
+        var (client, handler) = Build(Enumerable.Range(0, 6).Select(_ => Ok()));
         var series = client.EventSeries;
 
         await series.CreateEventSeriesAsync(new EventSeriesCreateRequest
@@ -309,8 +309,9 @@ public class SalesOperationTests
             Sales = "on",
             IdempotencyKey = "series-update-1",
         });
+        await series.AddEventSeriesDatesAsync("ser/1", new EventSeriesDatesRequest { RetryFailed = true });
 
-        Assert.Equal(5, handler.Calls.Count);
+        Assert.Equal(6, handler.Calls.Count);
         const string one = "https://api.seatlayer.io/v1/event-series/ser%2F1";
         AssertCall(handler, 0, HttpMethod.Post, "https://api.seatlayer.io/v1/event-series",
             "{\"name\":\"Hamlet\",\"chartKey\":\"chart_1\",\"schedule\":{\"rule\":\"weekly\","
@@ -325,6 +326,8 @@ public class SalesOperationTests
         AssertCall(handler, 4, HttpMethod.Patch, one,
             "{\"name\":\"Hamlet II\",\"prices\":{\"categories\":[{\"key\":\"A\",\"price\":45}]},\"sales\":\"on\"}",
             "series-update-1");
+        // Make again the dates that failed to be made.
+        AssertCall(handler, 5, HttpMethod.Post, one + "/dates", "{\"retryFailed\":true}", Generated);
     }
 
     [Fact]

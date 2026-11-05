@@ -36,6 +36,12 @@
 - Added `Holders.CreateHolderRenewalCheckoutAsync`: the same checkout for one of a holder's offers, with header replay.
 - Added `Holders.DeclineHolderRenewalOfferAsync`: decline one of a holder's offers, with an optional reason.
 - Added a `Seasons.DeclineSeasonRenewalOfferAsync` overload that takes a `reason`, kept on the offer as `declineReason`.
+- `SeasonUpdateRequest.Audience` takes `embed_only` or `public`.
+- `OpenSeasonSalesAsync` answers `warnings` (`checkout_test_missing` until a checkout test or rehearsal has passed) and can refuse with `409 plan_not_published` or `409 checkout_mode_not_chosen`.
+- A cancelled date refunds per date only: an amendment's `Refund` is `none` or `per_date`, and `SeasonPerformanceRefundRequest.Amount` is `per_date` (`full` answers `422 date_refund_per_date_only`; refund a whole order with the order refund).
+- `EventSeriesDatesRequest.RetryFailed` makes the failed dates again (`409 series_busy`, `422 nothing_to_retry`).
+- `OrderListRequest.HolderRef` lists one holder's orders; orders carry `holderRef` and `customerId`, and `buyer.email` can be null (a box office sale with no email).
+- Season holds, give-backs and date cancels can refuse with `performance_cancelled`, `refund_not_started` (503), `missing_manage_capability` (403) or `invalid_refund`; a holder's status can be `reserved`; hosted renewal readiness carries `missingPrices`.
 
 ## 0.8.0 (2026-09-10)
 

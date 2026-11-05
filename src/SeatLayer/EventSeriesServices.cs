@@ -83,8 +83,8 @@ public sealed class EventSeriesListRequest
 }
 
 /// <summary>
-/// Dates to add to an event series, copied from its first date. Set either
-/// <see cref="Schedule"/> or <see cref="Dates"/>.
+/// Dates to add to an event series, copied from its first date. Set one of
+/// <see cref="Schedule"/>, <see cref="Dates"/> or <see cref="RetryFailed"/>.
 /// </summary>
 public sealed class EventSeriesDatesRequest
 {
@@ -93,6 +93,13 @@ public sealed class EventSeriesDatesRequest
 
     /// <summary>Exact moments, <c>YYYY-MM-DDTHH:MM</c> in the series' zone.</summary>
     public IEnumerable<string>? Dates { get; set; }
+
+    /// <summary>
+    /// True to make again every date that failed to be made (up to 100, as in
+    /// <c>job.failedDates</c>): <c>422 nothing_to_retry</c> when none did, <c>409 series_busy</c>
+    /// while another change runs.
+    /// </summary>
+    public bool RetryFailed { get; set; }
 
     /// <summary>Optional key for exact server response replay.</summary>
     public string? IdempotencyKey { get; set; }
@@ -165,7 +172,10 @@ public sealed class EventSeriesService
         string eventKey, EventSeriesDatesRequest request, CancellationToken cancellationToken = default)
         => _client.PostHeaderReplayAsync(
             Path(eventKey, "/dates"),
-            Body.Of(("schedule", request.Schedule?.ToBody()), ("dates", request.Dates?.ToList())),
+            Body.Of(
+                ("schedule", request.Schedule?.ToBody()),
+                ("dates", request.Dates?.ToList()),
+                ("retryFailed", request.RetryFailed ? (object)true : null)),
             request.IdempotencyKey,
             cancellationToken);
 

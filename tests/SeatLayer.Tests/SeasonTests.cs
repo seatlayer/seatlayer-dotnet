@@ -473,13 +473,13 @@ public class SeasonTests
         var (client, handler) = Build(new[] { RateLimited(), Ok() }, maxRetries: 2);
 
         await client.Seasons.RefundSeasonPerformanceAsync(
-            "sea_1", "ev_1", new SeasonPerformanceRefundRequest { Amount = "full" });
+            "sea_1", "ev_1", new SeasonPerformanceRefundRequest { Amount = "per_date" });
 
         Assert.Equal(2, handler.Calls.Count);
         var keys = handler.Calls.Select(call => call.Headers.GetValues("Idempotency-Key").Single()).ToList();
         Assert.False(string.IsNullOrEmpty(keys[0]));
         Assert.Equal(keys[0], keys[1]);
-        Assert.Equal(Canonical("{\"amount\":\"full\"}"), Canonical(handler.Calls[1].Body!));
+        Assert.Equal(Canonical("{\"amount\":\"per_date\"}"), Canonical(handler.Calls[1].Body!));
     }
 
     [Fact]
@@ -534,7 +534,8 @@ public class SeasonTests
         });
         await seasons.UpdateSeasonAsync("sea_1", new SeasonUpdateRequest
         {
-            ExpectedRevision = 3, CheckoutMode = "seatlayer", TransferCutoffHours = 24, ReturnCutoffHours = null,
+            ExpectedRevision = 3, CheckoutMode = "seatlayer", Audience = "public",
+            TransferCutoffHours = 24, ReturnCutoffHours = null,
         });
         await seasons.UpdateSeasonAsync("sea_1", new SeasonUpdateRequest { ExpectedRevision = 4, Name = "Renamed" });
         await seasons.CreateSeasonHolderImportAsync("sea_1", new SeasonHolderImportRequest
@@ -562,8 +563,8 @@ public class SeasonTests
         {
             "{\"prices\":[{\"categoryKey\":\"stalls\",\"unitPrice\":18000},"
                 + "{\"categoryKey\":\"stalls\",\"priceTypeKey\":\"child\",\"unitPrice\":9000}]}",
-            "{\"expectedRevision\":3,\"checkoutMode\":\"seatlayer\",\"transferCutoffHours\":24,"
-                + "\"returnCutoffHours\":null}",
+            "{\"expectedRevision\":3,\"checkoutMode\":\"seatlayer\",\"audience\":\"public\","
+                + "\"transferCutoffHours\":24,\"returnCutoffHours\":null}",
             "{\"expectedRevision\":4,\"name\":\"Renamed\"}",
             "{\"successorPlanActivationId\":\"pa_1\",\"rows\":[{\"rowId\":\"r1\",\"holderRef\":\"h1\","
                 + "\"priorPlanActivationId\":\"pa_0\",\"priorContractRef\":\"c1\",\"labels\":[\"A-1\"],"

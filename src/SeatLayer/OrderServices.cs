@@ -9,6 +9,13 @@ public sealed class OrderListRequest
     /// <summary>Restrict results to one Season.</summary>
     public string? SeasonKey { get; set; }
 
+    /// <summary>
+    /// Restrict results to one holder's orders: the Season order with this id and renewals offered
+    /// to this reference. Each order carries <c>holderRef</c> and <c>customerId</c>, and
+    /// <c>buyer.email</c> is null for a box office sale taken without one.
+    /// </summary>
+    public string? HolderRef { get; set; }
+
     /// <summary>Restrict results to one order status.</summary>
     public string? Status { get; set; }
 
@@ -28,6 +35,7 @@ public sealed class OrderListRequest
     {
         ["eventKey"] = EventKey,
         ["seasonKey"] = SeasonKey,
+        ["holderRef"] = HolderRef,
         ["status"] = Status,
         ["from"] = From?.ToString(),
         ["to"] = To?.ToString(),

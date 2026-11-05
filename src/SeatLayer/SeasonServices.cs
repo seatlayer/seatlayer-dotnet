@@ -68,6 +68,12 @@ public sealed class SeasonUpdateRequest
     public string? CheckoutMode { get; set; }
 
     /// <summary>
+    /// <c>embed_only</c> or <c>public</c> (listed on your SeatLayer website; an ended Season cannot
+    /// become public, <c>409 sales_ended</c>). Left out when null.
+    /// </summary>
+    public string? Audience { get; set; }
+
+    /// <summary>
     /// Hours (0 to 720) before a date starts that its tickets stop being sent to others. Left out
     /// when unassigned; assign null to send null, which means until the date starts.
     /// </summary>
@@ -109,7 +115,8 @@ public sealed class SeasonUpdateRequest
             ("expectedRevision", ExpectedRevision),
             ("name", Name),
             ("edition", Edition),
-            ("checkoutMode", CheckoutMode));
+            ("checkoutMode", CheckoutMode),
+            ("audience", Audience));
         // Body.Of drops nulls, but an assigned null cutoff means "until the date starts".
         if (_transferCutoffHoursSet)
         {
@@ -320,8 +327,8 @@ public sealed class SeasonAmendmentCreateRequest
     public string? Name { get; set; }
 
     /// <summary>
-    /// With <c>cancel</c> only: refund the date's SeatLayer orders as a job. <c>none</c> (the
-    /// default), <c>per_date</c>, or <c>full</c>.
+    /// With <c>cancel</c> only: refund each SeatLayer order's share of the date as a job.
+    /// <c>none</c> (the default) or <c>per_date</c>; a whole-order refund is the order refund.
     /// </summary>
     public string? Refund { get; set; }
 
@@ -569,8 +576,8 @@ public sealed class SeasonOrderDateCancelRequest
 public sealed class SeasonPerformanceRefundRequest
 {
     /// <summary>
-    /// <c>per_date</c> (the date's share of each order, rounded down) or <c>full</c> (what is left
-    /// of each order).
+    /// <c>per_date</c>: the date's share of each order, rounded down. <c>full</c> is refused
+    /// (<c>422 date_refund_per_date_only</c>); refund a whole order with the order refund.
     /// </summary>
     public required string Amount { get; set; }
 
@@ -765,7 +772,12 @@ public sealed class SeasonsService
             null,
             cancellationToken);
 
-    /// <summary>Opens Season sales.</summary>
+    /// <summary>
+    /// Opens Season sales. The answer's <c>warnings</c> say what is advised but not required, such
+    /// as <c>checkout_test_missing</c> until a checkout test or rehearsal has passed. Refused with
+    /// <c>409 plan_not_published</c> or <c>409 checkout_mode_not_chosen</c> until a package is
+    /// published and a checkout mode is chosen.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> OpenSeasonSalesAsync(
         string seasonKey, long expectedRevision, CancellationToken cancellationToken = default)
         => SalesAsync(seasonKey, "open", expectedRevision, cancellationToken);
