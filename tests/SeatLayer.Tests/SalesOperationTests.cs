@@ -272,6 +272,28 @@ public class SalesOperationTests
     }
 
     [Fact]
+    public async Task EventSeriesFromAnEventSendsNoNameOrFloorPlan()
+    {
+        var (client, handler) = Build(new[] { Ok() });
+        await client.EventSeries.CreateEventSeriesAsync(new EventSeriesCreateRequest
+        {
+            FromEventKey = "lighthouse-keeper",
+            Schedule = new EventSeriesSchedule
+            {
+                Rule = "daily", From = "2026-11-06", Until = "2026-11-19", Times = new[] { "14:00" },
+            },
+            IdempotencyKey = "series-2",
+        });
+        AssertCall(handler, 0, HttpMethod.Post, "https://api.seatlayer.io/v1/event-series",
+            "{\"fromEventKey\":\"lighthouse-keeper\",\"schedule\":{\"rule\":\"daily\","
+            + "\"from\":\"2026-11-06\",\"until\":\"2026-11-19\",\"times\":[\"14:00\"]}}",
+            "series-2");
+        await Assert.ThrowsAsync<ArgumentException>(() => client.EventSeries.CreateEventSeriesAsync(
+            new EventSeriesCreateRequest { Schedule = new EventSeriesSchedule { Rule = "none", Times = new[] { "19:30" } } }));
+        Assert.Single(handler.Calls);
+    }
+
+    [Fact]
     public async Task EventSeriesMapAll5OperationsWithHeaderReplay()
     {
         var (client, handler) = Build(Enumerable.Range(0, 6).Select(_ => Ok()));

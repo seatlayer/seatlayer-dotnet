@@ -38,14 +38,24 @@ public sealed class EventSeriesSchedule
             ("dates", Dates?.ToList()));
 }
 
-/// <summary>Plans an event series from a schedule, or makes it as a job.</summary>
+/// <summary>
+/// Plans an event series from a schedule, or makes it as a job. Give <see cref="Name"/> and
+/// <see cref="ChartKey"/>, or <see cref="FromEventKey"/>.
+/// </summary>
 public sealed class EventSeriesCreateRequest
 {
-    /// <summary>The series name; each date is named from it.</summary>
-    public required string Name { get; set; }
+    /// <summary>The series name; every date carries it as its name. Leave it null with <see cref="FromEventKey"/>.</summary>
+    public string? Name { get; set; }
 
-    /// <summary>A published floor plan of this organization.</summary>
-    public required string ChartKey { get; set; }
+    /// <summary>A published floor plan of this organization. Leave it null with <see cref="FromEventKey"/>.</summary>
+    public string? ChartKey { get; set; }
+
+    /// <summary>
+    /// An event you already set up: it becomes the first date under its own key, and every other date is a
+    /// copy of it (floor plan, prices, checkout, poster and its own seat blocks, none of its orders, holds or
+    /// sales). The series takes the event's name, zone and floor plan.
+    /// </summary>
+    public string? FromEventKey { get; set; }
 
     /// <summary>The schedule the dates are made from.</summary>
     public required EventSeriesSchedule Schedule { get; set; }
@@ -144,9 +154,13 @@ public sealed class EventSeriesService
     /// <summary>Plans an event series from a schedule, or makes it as a job, with header replay.</summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateEventSeriesAsync(
         EventSeriesCreateRequest request, CancellationToken cancellationToken = default)
-        => _client.PostHeaderReplayAsync(
+    {
+        if (request.FromEventKey is null && (request.Name is null || request.ChartKey is null))
+            throw new ArgumentException("Give Name and ChartKey, or FromEventKey.", nameof(request));
+        return _client.PostHeaderReplayAsync(
             "/v1/event-series",
             Body.Of(
+                ("fromEventKey", request.FromEventKey),
                 ("name", request.Name),
                 ("chartKey", request.ChartKey),
                 ("schedule", request.Schedule.ToBody()),
@@ -156,6 +170,7 @@ public sealed class EventSeriesService
                 ("dryRun", request.DryRun)),
             request.IdempotencyKey,
             cancellationToken);
+    }
 
     /// <summary>Lists event series.</summary>
     public Task<IReadOnlyDictionary<string, object?>> ListEventSeriesAsync(
