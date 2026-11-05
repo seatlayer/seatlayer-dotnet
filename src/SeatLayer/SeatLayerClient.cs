@@ -89,7 +89,10 @@ public sealed class SeatLayerClient : IDisposable
         Charts = new ChartsService(this);
         Channels = new ChannelsService(this);
         Events = new EventsService(this);
+        EventSeries = new EventSeriesService(this);
+        Holders = new HoldersService(this);
         Inventory = new InventoryService(this);
+        Orders = new OrdersService(this);
         PerformanceGroups = new PerformanceGroupsService(this);
         Seasons = new SeasonsService(this);
         Sessions = new SessionsService(this);
@@ -107,11 +110,20 @@ public sealed class SeatLayerClient : IDisposable
     /// <summary>Private allocations, reporting, and origin-bound buyer access.</summary>
     public ChannelsService Channels { get; }
 
-    /// <summary>Event lifecycle, metadata and reports.</summary>
+    /// <summary>Event lifecycle, metadata, reports, checkout choice, sales state, booking fee and discount codes.</summary>
     public EventsService Events { get; }
+
+    /// <summary>Event series: many dated events made from one floor plan and a schedule.</summary>
+    public EventSeriesService EventSeries { get; }
+
+    /// <summary>Season holders, their tickets and ticket transfers, and the customer list.</summary>
+    public HoldersService Holders { get; }
 
     /// <summary>Holds, booking, blocking and availability.</summary>
     public InventoryService Inventory { get; }
+
+    /// <summary>Orders across events and Seasons, and an event's orders with refunds and cancellations.</summary>
+    public OrdersService Orders { get; }
 
     /// <summary>Fixed multi-performance runs, buyer access, and group booking lifecycle.</summary>
     public PerformanceGroupsService PerformanceGroups { get; }
@@ -167,6 +179,29 @@ public sealed class SeatLayerClient : IDisposable
         MutationRetryPolicy retryPolicy,
         CancellationToken cancellationToken)
     {
+        var (status, content) = await SendRawAsync(
+            method, path, query, body, idempotencyKey, retryPolicy, "application/json", cancellationToken)
+            .ConfigureAwait(false);
+
+        return status == HttpStatusCode.NoContent || string.IsNullOrWhiteSpace(content)
+            ? new Dictionary<string, object?>()
+            : Json.ToDictionary(content);
+    }
+
+    /// <summary>
+    /// The retry loop shared by JSON and text responses. Returns the success status and the
+    /// raw body; error statuses become exceptions here, so both callers map errors the same way.
+    /// </summary>
+    private async Task<(HttpStatusCode Status, string Content)> SendRawAsync(
+        HttpMethod method,
+        string path,
+        IDictionary<string, string?>? query,
+        object? body,
+        string? idempotencyKey,
+        MutationRetryPolicy retryPolicy,
+        string accept,
+        CancellationToken cancellationToken)
+    {
         var url = _baseUrl + path;
         if (query is not null)
         {
@@ -218,7 +253,7 @@ public sealed class SeatLayerClient : IDisposable
         {
             using var request = new HttpRequestMessage(method, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _secretKey);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
             request.Headers.UserAgent.ParseAdd("seatlayer-dotnet");
             if (resolvedKey is not null)
             {
@@ -265,9 +300,7 @@ public sealed class SeatLayerClient : IDisposable
 
                 if (response.IsSuccessStatusCode)
                 {
-                    return response.StatusCode == HttpStatusCode.NoContent || string.IsNullOrWhiteSpace(content)
-                        ? new Dictionary<string, object?>()
-                        : Json.ToDictionary(content);
+                    return (response.StatusCode, content);
                 }
 
                 // A proxy or WAF can answer with HTML; that must not become a parse crash
@@ -296,6 +329,19 @@ public sealed class SeatLayerClient : IDisposable
     internal Task<IReadOnlyDictionary<string, object?>> GetAsync(
         string path, IDictionary<string, string?>? query = null, CancellationToken cancellationToken = default)
         => SendAsync(HttpMethod.Get, path, query, cancellationToken: cancellationToken);
+
+    /// <summary>
+    /// A read whose success body is CSV, returned as raw text instead of decoded JSON.
+    /// Errors still arrive as JSON and map to the usual exceptions; reads keep their retries.
+    /// </summary>
+    internal async Task<string> GetCsvAsync(
+        string path, IDictionary<string, string?>? query = null, CancellationToken cancellationToken = default)
+    {
+        var (_, content) = await SendRawAsync(
+            HttpMethod.Get, path, query, null, null, MutationRetryPolicy.None, "text/csv", cancellationToken)
+            .ConfigureAwait(false);
+        return content;
+    }
 
     internal Task<IReadOnlyDictionary<string, object?>> PostAsync(
         string path, object? body = null, string? idempotencyKey = null,

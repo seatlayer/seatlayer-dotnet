@@ -403,8 +403,11 @@ public sealed class EventConfigurationBindingUpdateRequest
     public EventConfigurationReference? Configuration { get; set; }
 }
 
-/// <summary>Event lifecycle, metadata and reports.</summary>
-public sealed class EventsService
+/// <summary>
+/// Event lifecycle, metadata and reports, and event sales setup: who takes payment, the payment
+/// gateway, sales readiness and state, the booking fee, and discount codes.
+/// </summary>
+public sealed partial class EventsService
 {
     private readonly SeatLayerClient _client;
 

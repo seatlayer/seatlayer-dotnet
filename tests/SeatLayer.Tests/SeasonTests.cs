@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using SeatLayer;
 using Xunit;
 
@@ -26,10 +27,16 @@ public class SeasonTests
         => ((HttpStatusCode)429, "{\"error\":\"rate_limited\"}",
             new Dictionary<string, string> { ["Retry-After"] = "0" });
 
-    [Fact]
-    public async Task MapsAll48SeasonOperationsAndExactReplayClasses()
+    private static string Canonical(string json)
     {
-        var (client, handler) = Build(Enumerable.Range(0, 48).Select(_ => Ok()));
+        using var document = JsonDocument.Parse(json);
+        return JsonSerializer.Serialize(document.RootElement);
+    }
+
+    [Fact]
+    public async Task MapsAll80SeasonOperationsAndExactReplayClasses()
+    {
+        var (client, handler) = Build(Enumerable.Range(0, 80).Select(_ => Ok()));
         var seasons = client.Seasons;
 
         await seasons.ListSeasonsAsync(new SeasonListRequest
@@ -139,6 +146,87 @@ public class SeasonTests
         await seasons.ListSeasonAuditAsync("sea/a");
         await seasons.ExportSeasonSupportSnapshotAsync("sea/a");
 
+        await seasons.CreateSeasonHolderImportFromSeasonAsync(
+            "sea/a", new SeasonHolderImportFromSeasonRequest
+            {
+                SourceSeasonId = "sea_2026", SuccessorPlanActivationId = "activation_3", DryRun = true,
+                IdempotencyKey = "from-season-1",
+            });
+        await seasons.ListSeasonPerformancesAsync("sea/a");
+        await seasons.CreateSeasonPerformancesAsync("sea/a", new SeasonPerformanceCreateRequest
+        {
+            TitlePattern = "Match", FirstStartsAt = 1_800_000_000_000, Timezone = "UTC",
+            Repeat = "weekly", Count = 3, AttachToPlanKeys = new[] { "plan_1" },
+            IdempotencyKey = "perf-create-1",
+        });
+        await seasons.AttachSeasonPerformancesAsync("sea/a", new SeasonPerformanceAttachRequest
+        {
+            EventKeys = new[] { "ev_3" }, IdempotencyKey = "perf-attach-1",
+        });
+        await seasons.DeleteSeasonPerformanceAsync("sea/a", "ev/3", "perf-delete-1");
+        await seasons.UpdateSeasonPlanAsync("sea/a", "plan/1", new SeasonPlanUpdateRequest
+        {
+            Name = "Gold", IdempotencyKey = "plan-update-1",
+        });
+        await seasons.DeleteSeasonPlanAsync("sea/a", "plan/2", "plan-delete-1");
+        await seasons.PublishSeasonAsync("sea/a");
+        await seasons.CreateSeasonCheckoutTestAsync("sea/a");
+        await seasons.ListSeasonCheckoutTestsAsync("sea/a");
+        await seasons.ReplaceSeasonPackagePricesAsync("sea/a", "plan/1", new SeasonPackagePricesRequest
+        {
+            Prices = new[] { new SeasonPackagePrice { CategoryKey = "A", UnitPrice = 12000 } },
+            Currency = "EUR", IdempotencyKey = "prices-1",
+        });
+        await seasons.ListSeasonPricesAsync("sea/a");
+        await seasons.AttachSeasonPlanPerformanceAsync("sea/a", "plan/1", "ev_4", "plan-perf-1");
+        await seasons.DeleteSeasonPlanPerformanceAsync("sea/a", "plan/1", "ev/4", "plan-perf-2");
+        await seasons.MarkSeasonPerformancePastAsync("sea/a", "ev/4", true, "past-1");
+        await seasons.ReturnSeasonOccurrenceInventoryAsync(
+            "sea/a", "ev/5", new SeasonOccurrenceReturnRequest
+            {
+                ActionId = "return_1", BookingRef = "order_1", PlanActivationId = "activation_1",
+                Labels = new[] { "A-1", "A-2" },
+                Source = new SeasonOccurrenceInventorySource { BookingActionId = "book_1" },
+            });
+        await seasons.ReclaimSeasonOccurrenceInventoryAsync(
+            "sea/a", "ev/5", new SeasonOccurrenceReclaimRequest
+            {
+                ActionId = "reclaim_1", ReturnActionId = "return_1", BookingRef = "order_1",
+                PlanActivationId = "activation_1", Labels = new[] { "A-1" },
+                Source = new SeasonOccurrenceInventorySource { RenewalOfferId = "offer_1" },
+            });
+        await seasons.ListSeasonHoldersAsync("sea/a", new SeasonHolderListRequest
+        {
+            Query = "smith jones", Status = "active", Cursor = "c/2", Limit = 25,
+        });
+        await seasons.RefundSeasonOrderAsync("sea/a", "ord/1", new OrderRefundRequest
+        {
+            AmountMinor = 500, IdempotencyKey = "refund-1",
+        });
+        await seasons.CancelSeasonOrderAsync("sea/a", "ord/1", new OrderCancelRequest
+        {
+            Reason = "other", Note = "Duplicate", RefundConfirmed = true,
+            IdempotencyKey = "cancel-order-1",
+        });
+        await seasons.CancelSeasonOrderDateAsync(
+            "sea/a", "ord/1", "ev/6", new SeasonOrderDateCancelRequest
+            {
+                ActionId = "date_cancel_1", IdempotencyKey = "cancel-date-1",
+            });
+        await seasons.ResendSeasonOrderTicketsAsync("sea/a", "ord/1", "fan@example.com");
+        await seasons.RetrieveSeasonHostedRenewalsAsync("sea/a");
+        await seasons.RotateSeasonRenewalOfferLinkAsync("sea/a", "offer/1");
+        await seasons.UpdateSeasonRenewalOfferContactAsync(
+            "sea/a", "offer/1", new SeasonRenewalContactRequest { Email = null, Name = "Ana" });
+        await seasons.CreateSeasonRenewalNoticesAsync("sea/a", new[] { "offer_1", "offer_2" });
+        await seasons.ResendSeasonRenewalOfferAsync("sea/a", "offer/1");
+        await seasons.RetrieveSeasonSalesReportAsync("sea/a");
+        await seasons.RetrieveSeasonSeatsReportAsync("sea/a");
+        await seasons.ExportSeasonHoldersCsvAsync(
+            "sea/a", new SeasonHolderFilterRequest { Query = "smith", Status = "active" });
+        await seasons.ExportSeasonOrdersCsvAsync("sea/a");
+        await seasons.RetrieveSeasonSeatCountsAsync("sea/a");
+
         var expected = new (HttpMethod Method, string Url)[]
         {
             (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons?workspaceId=ws+1&structureState=draft&limit=20&cursor=c%2f1"),
@@ -189,9 +277,41 @@ public class SeasonTests
             (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/outbox/occurrence%2F1/replay"),
             (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/audit"),
             (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/export"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/imports/from-season"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/performances"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/performances"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/performances/attach"),
+            (HttpMethod.Delete, "https://api.seatlayer.io/v1/seasons/sea%2Fa/performances/ev%2F3"),
+            (HttpMethod.Patch, "https://api.seatlayer.io/v1/seasons/sea%2Fa/plans/plan%2F1"),
+            (HttpMethod.Delete, "https://api.seatlayer.io/v1/seasons/sea%2Fa/plans/plan%2F2"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/publish"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/checkout-tests"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/checkout-tests"),
+            (HttpMethod.Put, "https://api.seatlayer.io/v1/seasons/sea%2Fa/plans/plan%2F1/prices"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/prices"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/plans/plan%2F1/performances"),
+            (HttpMethod.Delete, "https://api.seatlayer.io/v1/seasons/sea%2Fa/plans/plan%2F1/performances/ev%2F4"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/performances/ev%2F4/past"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/occurrences/ev%2F5/returns"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/occurrences/ev%2F5/reclaims"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/holders?q=smith+jones&status=active&cursor=c%2f2&limit=25"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/orders/ord%2F1/refund"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/orders/ord%2F1/cancel"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/orders/ord%2F1/dates/ev%2F6/cancel"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/orders/ord%2F1/resend"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-hosted"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/offer%2F1/link"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/offer%2F1/contact"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-notices"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/offer%2F1/resend"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/reports/sales"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/reports/seats"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/reports/holders.csv?q=smith&status=active"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/reports/orders.csv"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/seat-counts"),
         };
 
-        Assert.Equal(48, handler.Calls.Count);
+        Assert.Equal(80, handler.Calls.Count);
         Assert.Null(handler.Calls[26].Body);
         Assert.Equal(expected.Length, handler.Calls.Count);
         for (var index = 0; index < expected.Length; index++)
@@ -200,22 +320,143 @@ public class SeasonTests
             Assert.Equal(expected[index].Url, handler.Calls[index].Url.AbsoluteUri);
         }
 
-        var replayKeys = new Dictionary<int, string>
+        // A null key means the caller passed none, so the SDK generated one.
+        var replayKeys = new Dictionary<int, string?>
         {
             [2] = "create-1", [4] = "update-1", [5] = "delete-1", [10] = "plan-1",
             [18] = "live-1", [27] = "import-1", [29] = "offers-1", [38] = "amendment-1",
+            [48] = "from-season-1", [50] = "perf-create-1", [51] = "perf-attach-1",
+            [52] = "perf-delete-1", [53] = "plan-update-1", [54] = "plan-delete-1",
+            [55] = null, [56] = null, [58] = "prices-1", [60] = "plan-perf-1",
+            [61] = "plan-perf-2", [62] = "past-1", [66] = "refund-1", [67] = "cancel-order-1",
+            [68] = "cancel-date-1",
         };
+        Assert.Equal(23, replayKeys.Count);
         for (var index = 0; index < handler.Calls.Count; index++)
         {
             if (replayKeys.TryGetValue(index, out var key))
             {
-                Assert.Equal(key, handler.Calls[index].Headers.GetValues("Idempotency-Key").Single());
+                var sent = handler.Calls[index].Headers.GetValues("Idempotency-Key").Single();
+                if (key is null)
+                {
+                    Assert.False(string.IsNullOrEmpty(sent));
+                }
+                else
+                {
+                    Assert.Equal(key, sent);
+                }
             }
             else
             {
                 Assert.False(handler.Calls[index].Headers.Contains("Idempotency-Key"));
             }
         }
+
+        // Bodies of the 32 operations added after the first 48. Null means no body at all.
+        var bodies = new Dictionary<int, string?>
+        {
+            [48] = "{\"sourceSeasonId\":\"sea_2026\",\"successorPlanActivationId\":\"activation_3\",\"dryRun\":true}",
+            [49] = null,
+            [50] = "{\"titlePattern\":\"Match\",\"firstStartsAt\":1800000000000,\"timezone\":\"UTC\",\"repeat\":\"weekly\",\"count\":3,\"attachToPlanKeys\":[\"plan_1\"]}",
+            [51] = "{\"eventKeys\":[\"ev_3\"]}",
+            [52] = null,
+            [53] = "{\"name\":\"Gold\"}",
+            [54] = null,
+            [55] = null,
+            [56] = "{}",
+            [57] = null,
+            [58] = "{\"prices\":[{\"categoryKey\":\"A\",\"unitPrice\":12000}],\"currency\":\"EUR\"}",
+            [59] = null,
+            [60] = "{\"eventKey\":\"ev_4\"}",
+            [61] = null,
+            [62] = "{\"force\":true}",
+            [63] = "{\"actionId\":\"return_1\",\"bookingRef\":\"order_1\",\"planActivationId\":\"activation_1\",\"labels\":[\"A-1\",\"A-2\"],\"source\":{\"bookingActionId\":\"book_1\"}}",
+            [64] = "{\"actionId\":\"reclaim_1\",\"returnActionId\":\"return_1\",\"bookingRef\":\"order_1\",\"planActivationId\":\"activation_1\",\"labels\":[\"A-1\"],\"source\":{\"renewalOfferId\":\"offer_1\"}}",
+            [65] = null,
+            [66] = "{\"amountMinor\":500}",
+            [67] = "{\"reason\":\"other\",\"note\":\"Duplicate\",\"refundConfirmed\":true}",
+            [68] = "{\"actionId\":\"date_cancel_1\"}",
+            [69] = "{\"email\":\"fan@example.com\"}",
+            [70] = null,
+            [71] = null,
+            [72] = "{\"email\":null,\"name\":\"Ana\"}",
+            [73] = "{\"offerIds\":[\"offer_1\",\"offer_2\"]}",
+            [74] = null,
+            [75] = null,
+            [76] = null,
+            [77] = null,
+            [78] = null,
+            [79] = null,
+        };
+        Assert.Equal(32, bodies.Count);
+        foreach (var (index, body) in bodies)
+        {
+            if (body is null)
+            {
+                Assert.Null(handler.Calls[index].Body);
+            }
+            else
+            {
+                Assert.Equal(Canonical(body), Canonical(handler.Calls[index].Body!));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task CsvExportsReturnRawTextAndPlanDeleteReturnsNothing()
+    {
+        const string holders = "holder,email\nH-1,fan@example.com\n";
+        const string orders = "order,total\nSO-1,12000\n";
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            (HttpStatusCode.OK, holders, new Dictionary<string, string>()),
+            (HttpStatusCode.OK, orders, new Dictionary<string, string>()),
+            (HttpStatusCode.NoContent, "", new Dictionary<string, string>()),
+        });
+
+        Assert.Equal(holders, await client.Seasons.ExportSeasonHoldersCsvAsync("sea/a"));
+        Assert.Equal(orders, await client.Seasons.ExportSeasonOrdersCsvAsync("sea/a"));
+        var deletion = client.Seasons.DeleteSeasonPlanAsync("sea/a", "plan/2");
+        await deletion;
+
+        Assert.True(deletion.IsCompletedSuccessfully);
+        Assert.Equal("text/csv", handler.Calls[0].Headers.Accept.Single().MediaType);
+        Assert.Equal(
+            "https://api.seatlayer.io/v1/seasons/sea%2Fa/reports/holders.csv",
+            handler.Calls[0].Url.AbsoluteUri);
+        Assert.Equal(HttpMethod.Delete, handler.Calls[2].Method);
+        Assert.False(string.IsNullOrEmpty(
+            handler.Calls[2].Headers.GetValues("Idempotency-Key").Single()));
+    }
+
+    [Fact]
+    public async Task PublishReplaysWithOneGeneratedKey()
+    {
+        var (client, handler) = Build(new[] { RateLimited(), Ok() }, maxRetries: 2);
+
+        await client.Seasons.PublishSeasonAsync("sea_1");
+
+        Assert.Equal(2, handler.Calls.Count);
+        var keys = handler.Calls.Select(call => call.Headers.GetValues("Idempotency-Key").Single()).ToList();
+        Assert.False(string.IsNullOrEmpty(keys[0]));
+        Assert.Equal(keys[0], keys[1]);
+    }
+
+    [Fact]
+    public async Task UnsupportedSeasonMutationsAreNeverRetried()
+    {
+        var (client, handler) = Build(
+            new[] { RateLimited(), RateLimited(), RateLimited() }, maxRetries: 3);
+
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(
+            () => client.Seasons.RotateSeasonRenewalOfferLinkAsync("sea_1", "offer_1"));
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(
+            () => client.Seasons.ResendSeasonOrderTicketsAsync("sea_1", "ord_1"));
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(
+            () => client.Seasons.ResendSeasonRenewalOfferAsync("sea_1", "offer_1"));
+
+        Assert.Equal(3, handler.Calls.Count);
+        Assert.All(handler.Calls, call => Assert.False(call.Headers.Contains("Idempotency-Key")));
     }
 
     [Fact]
