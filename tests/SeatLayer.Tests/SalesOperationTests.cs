@@ -83,9 +83,9 @@ public class SalesOperationTests
     }
 
     [Fact]
-    public async Task HoldersMapAll12Operations()
+    public async Task HoldersMapAll14Operations()
     {
-        var (client, handler) = Build(Enumerable.Range(0, 12).Select(_ => Ok()));
+        var (client, handler) = Build(Enumerable.Range(0, 15).Select(_ => Ok()));
         var holders = client.Holders;
 
         await holders.ListCustomersAsync(new CustomerListRequest
@@ -115,8 +115,15 @@ public class SalesOperationTests
         {
             TicketIds = new[] { "tkt_0123456789abcdef01234567" }, IdempotencyKey = "return-1",
         });
+        await holders.CreateHolderRenewalCheckoutAsync("h/1", "offer/1", new SeasonRenewalCheckoutRequest
+        {
+            ReturnUrl = "https://tickets.example/renewed", BuyerEmail = "cara@example.com",
+            BuyerName = "Cara", Provider = "stripe", IdempotencyKey = "renew-1",
+        });
+        await holders.DeclineHolderRenewalOfferAsync("h/1", "offer/1", "Moving away");
+        await holders.DeclineHolderRenewalOfferAsync("h/1", "offer/1");
 
-        Assert.Equal(12, handler.Calls.Count);
+        Assert.Equal(15, handler.Calls.Count);
         const string holder = "https://api.seatlayer.io/v1/holders/h%2F1";
         AssertCall(handler, 0, HttpMethod.Get,
             "https://api.seatlayer.io/v1/customers?email=fan%40example.com&holderRef=h%2f1&cursor=c%2f1&limit=10",
@@ -137,6 +144,12 @@ public class SalesOperationTests
         AssertCall(handler, 10, HttpMethod.Post, holder + "/transfers/tr%2F1/accept", null, null);
         AssertCall(handler, 11, HttpMethod.Post, holder + "/returns",
             "{\"ticketIds\":[\"tkt_0123456789abcdef01234567\"]}", "return-1");
+        AssertCall(handler, 12, HttpMethod.Post, holder + "/renewal-offers/offer%2F1/checkout",
+            "{\"returnUrl\":\"https://tickets.example/renewed\",\"buyerEmail\":\"cara@example.com\","
+            + "\"buyerName\":\"Cara\",\"provider\":\"stripe\"}", "renew-1");
+        AssertCall(handler, 13, HttpMethod.Post, holder + "/renewal-offers/offer%2F1/decline",
+            "{\"reason\":\"Moving away\"}", null);
+        AssertCall(handler, 14, HttpMethod.Post, holder + "/renewal-offers/offer%2F1/decline", "{}", null);
     }
 
     [Fact]
@@ -361,6 +374,34 @@ public class SalesOperationTests
         Assert.All(
             handler.Calls,
             call => Assert.Equal("refund-7", call.Headers.GetValues("Idempotency-Key").Single()));
+    }
+
+    [Fact]
+    public async Task HolderRenewalCheckoutReplaysWithOneGeneratedKeyButDeclineIsSentOnce()
+    {
+        var (client, handler) = Build(
+            new[] { RateLimited(), Created("{\"orderId\":\"ord_1\"}"), RateLimited() }, maxRetries: 3);
+
+        var result = await client.Holders.CreateHolderRenewalCheckoutAsync(
+            "a/b", "offer_1", new SeasonRenewalCheckoutRequest { ReturnUrl = "https://tickets.example/r" });
+        await Assert.ThrowsAsync<SeatLayerRateLimitException>(
+            () => client.Holders.DeclineHolderRenewalOfferAsync("a/b", "offer_1", "Moving away"));
+
+        Assert.Contains("orderId", result);
+        Assert.Equal(3, handler.Calls.Count);
+        for (var index = 0; index < 2; index++)
+        {
+            AssertCall(handler, index, HttpMethod.Post,
+                "https://api.seatlayer.io/v1/holders/a%2Fb/renewal-offers/offer_1/checkout",
+                "{\"returnUrl\":\"https://tickets.example/r\"}", Generated);
+        }
+
+        Assert.Equal(
+            handler.Calls[0].Headers.GetValues("Idempotency-Key").Single(),
+            handler.Calls[1].Headers.GetValues("Idempotency-Key").Single());
+        AssertCall(handler, 2, HttpMethod.Post,
+            "https://api.seatlayer.io/v1/holders/a%2Fb/renewal-offers/offer_1/decline",
+            "{\"reason\":\"Moving away\"}", null);
     }
 
     [Fact]

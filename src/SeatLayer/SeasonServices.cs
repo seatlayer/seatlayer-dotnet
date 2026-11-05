@@ -271,6 +271,36 @@ public sealed class SeasonRenewalCommitRequest
     public required string PlanActivationId { get; set; }
 }
 
+/// <summary>Starts a SeatLayer checkout that renews an offer, with no hosted page.</summary>
+public sealed class SeasonRenewalCheckoutRequest
+{
+    /// <summary>
+    /// Where the buyer comes back to, on one of the organization's allowed domains.
+    /// <c>seatlayer_checkout=success</c> or <c>seatlayer_checkout=cancelled</c> is added.
+    /// </summary>
+    public required string ReturnUrl { get; set; }
+
+    /// <summary>
+    /// Where the tickets go when no email is on file for the holder; the one on file wins.
+    /// </summary>
+    public string? BuyerEmail { get; set; }
+
+    /// <summary>The buyer's name.</summary>
+    public string? BuyerName { get; set; }
+
+    /// <summary>Which connected gateway to pay with, when the organization has more than one.</summary>
+    public string? Provider { get; set; }
+
+    /// <summary>Optional key for exact server response replay.</summary>
+    public string? IdempotencyKey { get; set; }
+
+    internal Dictionary<string, object?> ToBody() => Body.Of(
+        ("returnUrl", ReturnUrl),
+        ("buyerEmail", BuyerEmail),
+        ("buyerName", BuyerName),
+        ("provider", Provider));
+}
+
 /// <summary>Creates an audited occurrence amendment.</summary>
 public sealed class SeasonAmendmentCreateRequest
 {
@@ -919,12 +949,22 @@ public sealed class SeasonsService
             null,
             cancellationToken);
 
-    /// <summary>Declines a renewal offer.</summary>
+    /// <summary>Declines a renewal offer and releases its seats at once.</summary>
     public Task<IReadOnlyDictionary<string, object?>> DeclineSeasonRenewalOfferAsync(
         string seasonKey, string offerId, CancellationToken cancellationToken = default)
+        => DeclineSeasonRenewalOfferAsync(seasonKey, offerId, null, cancellationToken);
+
+    /// <summary>
+    /// Declines a renewal offer and releases its seats at once, keeping the holder's reason
+    /// (1 to 200 characters) on the offer as <c>declineReason</c>. A repeated decline keeps the
+    /// first reason. A null reason sends none.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> DeclineSeasonRenewalOfferAsync(
+        string seasonKey, string offerId, string? reason,
+        CancellationToken cancellationToken = default)
         => _client.PostAsync(
             Path(seasonKey, $"/renewal-offers/{SeatLayerClient.Escape(offerId)}/decline"),
-            new Dictionary<string, object?>(),
+            Body.Of(("reason", reason)),
             null,
             cancellationToken);
 
@@ -1333,6 +1373,44 @@ public sealed class SeasonsService
             Path(seasonKey, $"/renewal-offers/{SeatLayerClient.Escape(offerId)}/resend"),
             null,
             null,
+            cancellationToken);
+
+    /// <summary>
+    /// Retrieves what renewing an offer costs, priced as the SeatLayer checkout will charge it.
+    /// <c>problem</c> is null when SeatLayer checkout can take the renewal now; otherwise it says
+    /// why not.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonRenewalQuoteAsync(
+        string seasonKey, string offerId, CancellationToken cancellationToken = default)
+        => _client.GetAsync(
+            Path(seasonKey, $"/renewal-offers/{SeatLayerClient.Escape(offerId)}/quote"),
+            null,
+            cancellationToken);
+
+    /// <summary>
+    /// Records that the holder means to renew, for a renewal taken by phone or at the box office,
+    /// so your own checkout can commit the offer. Single-attempt; a repeat answers the same offer.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> CreateSeasonRenewalIntentAsync(
+        string seasonKey, string offerId, CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            Path(seasonKey, $"/renewal-offers/{SeatLayerClient.Escape(offerId)}/intent"),
+            null,
+            null,
+            cancellationToken);
+
+    /// <summary>
+    /// Starts a SeatLayer checkout that renews an offer, with no hosted page, with header replay.
+    /// Send the buyer to <c>payment.url</c>; paying renews the offer. A repeat with the same key
+    /// answers the same order.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> CreateSeasonRenewalCheckoutAsync(
+        string seasonKey, string offerId, SeasonRenewalCheckoutRequest request,
+        CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            Path(seasonKey, $"/renewal-offers/{SeatLayerClient.Escape(offerId)}/checkout"),
+            request.ToBody(),
+            request.IdempotencyKey,
             cancellationToken);
 
     /// <summary>Retrieves Season money, seats, holders and renewals as totals.</summary>

@@ -104,10 +104,11 @@ new SeatLayerClient(secretKey, new SeatLayerClientOptions { HttpClient = factory
 
 ## Fixed renewable Seasons
 
-`client.Seasons` exposes all 83 trusted organiser operations: the 48 from version `0.7.0`,
+`client.Seasons` exposes all 86 trusted organiser operations: the 48 from version `0.7.0`,
 plus performances, package prices (`SeasonPackagePrice.PriceTypeKey`: `adult`, `child`,
 `concession`, `senior` or `student`), publishing, checkout tests, occurrence returns, holders,
-Season orders, hosted renewal links and notices, sales and seat reports with CSV exports, and the
+Season orders, hosted renewal links and notices, renewal quotes, intents and checkouts, sales and
+seat reports with CSV exports, and the
 bulk refund of a cancelled date (`RefundSeasonPerformanceAsync`) with its jobs
 (`ListSeasonBulkJobsAsync`, `RetrieveSeasonBulkJobAsync`).
 Validate compatible events before creation, then keep the secret key on your server and give the
@@ -134,8 +135,29 @@ var created = await client.Seasons.CreateSeasonAsync(new SeasonCreateRequest
 ```
 
 Season lifecycle, booking, cancellation, and renewal commits are domain-idempotent and therefore
-remain single-attempt. The 24 Season operations with exact header replay are retried; the full
-client has 38 exact-header-replay mutations.
+remain single-attempt. The 25 Season operations with exact header replay are retried; the full
+client has 40 exact-header-replay mutations.
+
+When SeatLayer takes the Season's payments, renew a holder with no hosted page: read the price,
+start a checkout, and send the holder to `payment.url`. For a renewal taken by phone or at the box
+office, `CreateSeasonRenewalIntentAsync` records the holder's intent before you commit the offer.
+A decline can carry the holder's reason.
+
+```csharp
+var quote = await client.Seasons.RetrieveSeasonRenewalQuoteAsync(seasonKey, offerId);
+if (quote["problem"] is null)
+{
+    var started = await client.Seasons.CreateSeasonRenewalCheckoutAsync(
+        seasonKey, offerId, new SeasonRenewalCheckoutRequest
+        {
+            ReturnUrl = "https://tickets.yourclub.example/renewed",
+            IdempotencyKey = $"renew-{offerId}",
+        });
+    // Send the holder to the "url" under started["payment"].
+}
+
+await client.Holders.DeclineHolderRenewalOfferAsync("holder_123", offerId, "Moving away");
+```
 
 The three CSV exports (`Seasons.ExportSeasonHoldersCsvAsync`, `Seasons.ExportSeasonOrdersCsvAsync`
 and `Orders.ExportEventOrdersCsvAsync`) return the CSV as a raw string. `Seasons.DeleteSeasonPlanAsync`
@@ -369,11 +391,11 @@ support requests.
 ## Reliability
 
 **Retries.** Reads (`GET`/`HEAD`) retry 429, 408 and 5xx with exponential backoff and full jitter;
-`Retry-After` wins when the server sends it. 38 mutations use exact header replay:
+`Retry-After` wins when the server sends it. 40 mutations use exact header replay:
 
 - `Charts.CreateAsync`, `Charts.CopyAsync`, `Templates.InstantiateTemplateAsync`,
   `Events.CreateAsync`, `Workspaces.CreateAsync`, `PerformanceGroups.CreateAsync`
-- 24 on `Seasons`: `CreateSeasonAsync`, `UpdateSeasonAsync`, `DeleteSeasonAsync`,
+- 25 on `Seasons`: `CreateSeasonAsync`, `UpdateSeasonAsync`, `DeleteSeasonAsync`,
   `CreateSeasonPlanAsync`, `DuplicateSeasonToLiveAsync`, `CreateSeasonHolderImportAsync`,
   `CreateSeasonRenewalOffersAsync`, `CreateSeasonAmendmentAsync`,
   `CreateSeasonHolderImportFromSeasonAsync`, `CreateSeasonPerformancesAsync`,
@@ -381,17 +403,18 @@ support requests.
   `DeleteSeasonPlanAsync`, `PublishSeasonAsync`, `CreateSeasonCheckoutTestAsync`,
   `ReplaceSeasonPackagePricesAsync`, `AttachSeasonPlanPerformanceAsync`,
   `DeleteSeasonPlanPerformanceAsync`, `MarkSeasonPerformancePastAsync`, `RefundSeasonOrderAsync`,
-  `CancelSeasonOrderAsync`, `CancelSeasonOrderDateAsync`, and `RefundSeasonPerformanceAsync`
+  `CancelSeasonOrderAsync`, `CancelSeasonOrderDateAsync`, `RefundSeasonPerformanceAsync`, and
+  `CreateSeasonRenewalCheckoutAsync`
 - `Holders.UpdateHolderAsync`, `Holders.CreateHolderTransferAsync`,
-  `Holders.CreateHolderReturnAsync`, `Orders.RefundEventOrderAsync`, and
-  `Orders.CancelEventOrderAsync`
+  `Holders.CreateHolderReturnAsync`, `Holders.CreateHolderRenewalCheckoutAsync`,
+  `Orders.RefundEventOrderAsync`, and `Orders.CancelEventOrderAsync`
 - `EventSeries.CreateEventSeriesAsync`, `EventSeries.AddEventSeriesDatesAsync`, and
   `EventSeries.UpdateEventSeriesAsync`
 
 Other 4xx responses are never retried. A cancelled `CancellationToken` stops the loop immediately
 rather than being treated as a transient fault.
 
-**Idempotency.** Those 38 replay-backed operations carry an `Idempotency-Key`, generated when you
+**Idempotency.** Those 40 replay-backed operations carry an `Idempotency-Key`, generated when you
 do not supply one and reused across attempts. All remaining SDK mutations are single-attempt. Some
 have a server-side domain idempotency contract, but the SDK does not retry them automatically. This
 includes inventory holds and bookings, show-once credential or secret creation, unsupported
@@ -431,7 +454,7 @@ payment gateway, sales readiness and state, the booking fee, and discount codes.
 | `Events` | `ListAsync` `ListAllAsync` `CreateAsync` `RetrieveAsync` `RetrieveConfigurationBindingAsync` `UpdateConfigurationBindingAsync` `UpdateAsync` `DeleteAsync` `UpdateChartAsync` `CloseAsync` `ReopenAsync` `ArchiveAsync` `RetrieveHoldTtlAsync` `UpdateHoldTtlAsync` `ListTicketReleasesAsync` `UpdateTicketReleasesAsync` `CloseTicketReleaseAsync` `RetrieveReportAsync` `RetrieveLogAsync` `RetrieveEventBuyerCheckoutAsync` `ReplaceEventBuyerCheckoutAsync` `RetrieveEventPaymentGatewayAsync` `ReplaceEventPaymentGatewayAsync` `RetrieveEventSalesReadinessAsync` `PreflightEventSalesAsync` `TransitionEventSalesAsync` `RetrieveEventBookingFeeAsync` `ReplaceEventBookingFeeAsync` `ListEventDiscountCodesAsync` `CreateEventDiscountCodeAsync` `UpdateEventDiscountCodeAsync` `EndEventDiscountCodeAsync` `DeleteEventDiscountCodeAsync` |
 | `EventSeries` | `CreateEventSeriesAsync` `ListEventSeriesAsync` `RetrieveEventSeriesAsync` `AddEventSeriesDatesAsync` `UpdateEventSeriesAsync` |
 | `Channels` | `ListAsync` `CreateAsync` `UpdateAsync` `UpdateAssignmentsAsync` `ListAllocationAsync` `RetrieveAccessPreviewAsync` `RetrieveReportAsync` `PauseAsync` `UnpauseAsync` `ArchiveAsync` `CreateBuyerAccessSessionAsync` `ListBuyerAccessSessionsAsync` `RevokeBuyerAccessSessionAsync` |
-| `Holders` | `ListCustomersAsync` `RetrieveHolderAsync` `UpdateHolderAsync` `RevokeHolderSessionsAsync` `ListHolderSeasonsAsync` `ListHolderTicketsAsync` `RetrieveHolderTicketAsync` `CreateHolderTransferAsync` `ListHolderTransfersAsync` `CancelHolderTransferAsync` `AcceptHolderTransferAsync` `CreateHolderReturnAsync` |
+| `Holders` | `ListCustomersAsync` `RetrieveHolderAsync` `UpdateHolderAsync` `RevokeHolderSessionsAsync` `ListHolderSeasonsAsync` `ListHolderTicketsAsync` `RetrieveHolderTicketAsync` `CreateHolderTransferAsync` `ListHolderTransfersAsync` `CancelHolderTransferAsync` `AcceptHolderTransferAsync` `CreateHolderReturnAsync` `CreateHolderRenewalCheckoutAsync` `DeclineHolderRenewalOfferAsync` |
 | `Inventory` | `HoldAsync` `HoldBestAvailableAsync` `BookBestAvailableAsync` `ExtendHoldAsync` `RetrieveHoldAsync` `ReleaseAsync` `BookAsync` `BookLabelsAsync` `BoxOfficeBookAsync` `UnbookAsync` `BlockAsync` `UnblockAsync` `UnblockAllAsync` `RetrieveAvailabilityAsync` `UpdateAvailabilityAsync` `ListBookingsAsync` `RetrieveBookingAsync` |
 | `Orders` | `ListOrdersAsync` `RetrieveOrderAsync` `ListOrderTicketsAsync` `ListEventOrdersAsync` `RetrieveEventOrderAsync` `ExportEventOrdersCsvAsync` `RefundEventOrderAsync` `CancelEventOrderAsync` `ResendEventOrderTicketsAsync` |
 | `Sessions` | `CreateManageSessionAsync` `RevokeManageSessionAsync` `CreateDesignerSessionAsync` `RevokeDesignerSessionAsync` |

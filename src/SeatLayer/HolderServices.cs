@@ -134,7 +134,7 @@ public sealed class HolderReturnCreateRequest
 
 /// <summary>
 /// Season ticket holders: the customer behind a holder reference, their Seasons and tickets,
-/// ticket transfers and returns, and the customer list.
+/// ticket transfers, returns and renewals, and the customer list.
 /// </summary>
 /// <remarks>
 /// A holder reference is your own reference, as your imports and bookings carry it; a hosted
@@ -238,5 +238,33 @@ public sealed class HoldersService
             Path(holderRef, "/returns"),
             Body.Of(("ticketIds", request.TicketIds.ToList())),
             request.IdempotencyKey,
+            cancellationToken);
+
+    /// <summary>
+    /// Starts a SeatLayer checkout that renews one of a holder's offers (<c>renewalOffer</c> on
+    /// <see cref="ListHolderSeasonsAsync"/>), with header replay. Send the buyer to
+    /// <c>payment.url</c>. A repeat with the same key answers the same order.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> CreateHolderRenewalCheckoutAsync(
+        string holderRef, string offerId, SeasonRenewalCheckoutRequest request,
+        CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            Path(holderRef, $"/renewal-offers/{SeatLayerClient.Escape(offerId)}/checkout"),
+            request.ToBody(),
+            request.IdempotencyKey,
+            cancellationToken);
+
+    /// <summary>
+    /// Declines one of a holder's renewal offers and releases its seats. The reason (1 to 200
+    /// characters) is kept on the offer as <c>declineReason</c>; declining again answers the same
+    /// offer, with the first reason. Single-attempt.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> DeclineHolderRenewalOfferAsync(
+        string holderRef, string offerId, string? reason = null,
+        CancellationToken cancellationToken = default)
+        => _client.PostAsync(
+            Path(holderRef, $"/renewal-offers/{SeatLayerClient.Escape(offerId)}/decline"),
+            Body.Of(("reason", reason)),
+            null,
             cancellationToken);
 }

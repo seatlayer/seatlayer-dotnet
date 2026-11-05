@@ -2,18 +2,19 @@
 
 ## Unreleased
 
-- `Seasons` grows from 48 to 83 operations: performances, package updates and prices, one-call
+- `Seasons` grows from 48 to 86 operations: performances, package updates and prices, one-call
   publishing, checkout tests, occurrence returns and reclaims, holders, Season order refunds and
-  cancellations, hosted renewal links, contacts and notices, sales and seat reports, holder and
+  cancellations, hosted renewal links, contacts and notices, renewal quotes, intents and
+  checkouts, sales and seat reports, holder and
   order CSV exports, and bulk refunds with their jobs.
-- Added `Holders` (12 operations: customers, holder details and sessions, tickets, ticket
-  transfers, and returns), `Orders` (9 operations: orders across events and Seasons, and an
+- Added `Holders` (14 operations: customers, holder details and sessions, tickets, ticket
+  transfers, returns, and renewals), `Orders` (9 operations: orders across events and Seasons, and an
   event's orders with refunds, cancellations, ticket emails, and CSV export), and `EventSeries`
   (5 operations).
 - Added `Holders.CreateHolderReturnAsync`: give back a holder's seat on one date, one per ticket.
 - `Events` gains 14 sales setup methods: buyer checkout choice, payment gateway, sales readiness,
   preflight and transitions, booking fee, and discount codes.
-- 24 of the new mutations use exact header replay, so 38 client mutations now retry with one
+- 26 of the new mutations use exact header replay, so 40 client mutations now retry with one
   stable `Idempotency-Key`. Unsupported operations, including the show-once renewal link rotation,
   stay single-attempt.
 - CSV exports return the raw text. `DeleteSeasonPlanAsync` and `DeleteEventDiscountCodeAsync`
@@ -29,6 +30,12 @@
   assigned null cutoff is sent as null.
 - `SeasonHolderImportRow` takes `HolderEmail` and `HolderName`, left out when null.
 - `EventListRequest` takes `SeriesKey` to list one event series' dates.
+- Added `Seasons.RetrieveSeasonRenewalQuoteAsync`: what renewing an offer costs, and whether SeatLayer checkout can take it now.
+- Added `Seasons.CreateSeasonRenewalIntentAsync`: record a holder's intent for a renewal taken by phone or at the box office, so your own checkout can commit.
+- Added `Seasons.CreateSeasonRenewalCheckoutAsync`: a SeatLayer checkout that renews an offer with no hosted page, with header replay (`SeasonRenewalCheckoutRequest`).
+- Added `Holders.CreateHolderRenewalCheckoutAsync`: the same checkout for one of a holder's offers, with header replay.
+- Added `Holders.DeclineHolderRenewalOfferAsync`: decline one of a holder's offers, with an optional reason.
+- Added a `Seasons.DeclineSeasonRenewalOfferAsync` overload that takes a `reason`, kept on the offer as `declineReason`.
 
 ## 0.8.0 (2026-09-10)
 
