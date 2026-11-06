@@ -88,7 +88,8 @@ public sealed class SeasonUpdateRequest
 
     /// <summary>
     /// Hours (0 to 720) before a date starts that its tickets stop being sent to others. Left out
-    /// when unassigned; assign null to send null, which means until the date starts.
+    /// when unassigned; assign null to send null, which means the club default (Settings ›
+    /// Ticket site), or until the date starts when the club has none.
     /// </summary>
     public int? TransferCutoffHours
     {
@@ -102,7 +103,7 @@ public sealed class SeasonUpdateRequest
 
     /// <summary>
     /// Hours (0 to 720) before a date starts that a holder can no longer give a seat back. Left out
-    /// when unassigned; assign null to send null, which means until the date starts.
+    /// when unassigned; assign null to send null, which means the club default.
     /// </summary>
     public int? ReturnCutoffHours
     {

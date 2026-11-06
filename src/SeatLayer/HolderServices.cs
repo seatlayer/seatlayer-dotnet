@@ -194,7 +194,10 @@ public sealed class HoldersService
         => _client.GetAsync(
             Path(holderRef, $"/tickets/{SeatLayerClient.Escape(ticketId)}"), null, cancellationToken);
 
-    /// <summary>Sends some of a holder's Season tickets to an email address, with header replay.</summary>
+    /// <summary>
+    /// Sends some of a holder's Season tickets to an email address, with header replay. Turning
+    /// customer sends off in Settings › Ticket site doesn't stop your server; cut-offs still apply.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateHolderTransferAsync(
         string holderRef, HolderTransferCreateRequest request,
         CancellationToken cancellationToken = default)
@@ -229,7 +232,8 @@ public sealed class HoldersService
 
     /// <summary>
     /// Gives back a holder's seat on one date, one per ticket, with header replay. A repeat
-    /// answers with the same return.
+    /// answers with the same return. Turning give-backs off in Settings › Ticket site doesn't
+    /// stop your server; cut-offs still apply.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateHolderReturnAsync(
         string holderRef, HolderReturnCreateRequest request,

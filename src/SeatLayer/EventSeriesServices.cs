@@ -122,8 +122,9 @@ public sealed class EventSeriesUpdateRequest
     public string? Name { get; set; }
 
     /// <summary>
-    /// New prices as the API takes them: a <c>categories</c> list covering every category of
-    /// the floor plan. New orders pay these.
+    /// New prices as the API takes them: a <c>categories</c> list of only the categories whose
+    /// price changes (for a tiered category, only the tiers sent). Every price left out keeps
+    /// each date's own value. New orders pay these.
     /// </summary>
     public IDictionary<string, object?>? Prices { get; set; }
 
@@ -199,7 +200,8 @@ public sealed class EventSeriesService
             cancellationToken);
 
     /// <summary>
-    /// Changes the name, prices or sales of every upcoming date, with header replay.
+    /// Changes the name, prices or sales of every upcoming date, with header replay. Send only the
+    /// prices that change: each date keeps its own price for the rest.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> UpdateEventSeriesAsync(
         string eventKey, EventSeriesUpdateRequest request, CancellationToken cancellationToken = default)
