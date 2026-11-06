@@ -552,6 +552,46 @@ public class SeasonTests
     }
 
     [Fact]
+    public async Task SingleTicketsReachTheWireOnCreateAndUpdate()
+    {
+        const string updated = "{\"season\":{\"key\":\"sea_1\",\"singleTickets\":true},\"singleTicketDates\":"
+            + "{\"direction\":\"open\",\"opened\":[\"ev_1\"],\"closed\":[],\"notOpened\":[],\"jobId\":null}}";
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            (HttpStatusCode.Created, "{\"season\":{\"key\":\"sea_1\",\"singleTickets\":true}}",
+                new Dictionary<string, string>()),
+            (HttpStatusCode.OK, updated, new Dictionary<string, string>()),
+            Ok(),
+        });
+        var seasons = client.Seasons;
+
+        await seasons.CreateSeasonAsync(new SeasonCreateRequest
+        {
+            Name = "Series", EventKeys = new[] { "ev_1", "ev_2" }, SingleTickets = true,
+            IdempotencyKey = "create-1",
+        });
+        var answer = await seasons.UpdateSeasonAsync("sea/a", new SeasonUpdateRequest
+        {
+            ExpectedRevision = 5, SingleTickets = false, IdempotencyKey = "update-1",
+        });
+        await seasons.UpdateSeasonAsync("sea/a", new SeasonUpdateRequest { ExpectedRevision = 6, Name = "Series 2" });
+
+        Assert.Equal(3, handler.Calls.Count);
+        Assert.Equal(HttpMethod.Post, handler.Calls[0].Method);
+        Assert.Equal(
+            Canonical("{\"eventKeys\":[\"ev_1\",\"ev_2\"],\"name\":\"Series\",\"singleTickets\":true}"),
+            Canonical(handler.Calls[0].Body!));
+        Assert.Equal(HttpMethod.Patch, handler.Calls[1].Method);
+        Assert.Equal("https://api.seatlayer.io/v1/seasons/sea%2Fa", handler.Calls[1].Url.AbsoluteUri);
+        Assert.Equal(
+            Canonical("{\"expectedRevision\":5,\"singleTickets\":false}"), Canonical(handler.Calls[1].Body!));
+        Assert.Equal(
+            Canonical("{\"expectedRevision\":6,\"name\":\"Series 2\"}"), Canonical(handler.Calls[2].Body!));
+        var dates = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(answer["singleTicketDates"]);
+        Assert.Equal("open", dates["direction"]);
+    }
+
+    [Fact]
     public async Task RenewalNoticesForOneOfferBatchSendItsBatchId()
     {
         var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]

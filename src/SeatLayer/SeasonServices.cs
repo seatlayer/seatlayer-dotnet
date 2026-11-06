@@ -45,6 +45,12 @@ public sealed class SeasonCreateRequest : SeasonSelectionRequest
     /// <summary>Optional edition label, such as 2027.</summary>
     public string? Edition { get; set; }
 
+    /// <summary>
+    /// True: each date also sells its own single tickets once the Season is on sale. Left out when
+    /// null; the default is Season only.
+    /// </summary>
+    public bool? SingleTickets { get; set; }
+
     /// <summary>Optional key for exact server response replay.</summary>
     public string? IdempotencyKey { get; set; }
 }
@@ -72,6 +78,13 @@ public sealed class SeasonUpdateRequest
     /// become public, <c>409 sales_ended</c>). Left out when null.
     /// </summary>
     public string? Audience { get; set; }
+
+    /// <summary>
+    /// Turned on while the Season is on sale, each upcoming date's own sales open through its
+    /// readiness checks; turned off, they stop. The answer's <c>singleTicketDates</c> says which.
+    /// Left out when null.
+    /// </summary>
+    public bool? SingleTickets { get; set; }
 
     /// <summary>
     /// Hours (0 to 720) before a date starts that its tickets stop being sent to others. Left out
@@ -116,7 +129,8 @@ public sealed class SeasonUpdateRequest
             ("name", Name),
             ("edition", Edition),
             ("checkoutMode", CheckoutMode),
-            ("audience", Audience));
+            ("audience", Audience),
+            ("singleTickets", SingleTickets));
         // Body.Of drops nulls, but an assigned null cutoff means "until the date starts".
         if (_transferCutoffHoursSet)
         {
@@ -706,6 +720,11 @@ public sealed class SeasonsService
             body["edition"] = request.Edition;
         }
 
+        if (request.SingleTickets is not null)
+        {
+            body["singleTickets"] = request.SingleTickets;
+        }
+
         return _client.PostHeaderReplayAsync(
             "/v1/seasons", body, request.IdempotencyKey, cancellationToken);
     }
@@ -716,8 +735,9 @@ public sealed class SeasonsService
         => _client.GetAsync(Path(seasonKey), null, cancellationToken);
 
     /// <summary>
-    /// Updates Season identity fields, checkout mode, and transfer and return cutoffs with
-    /// compare-and-set and header replay.
+    /// Updates Season identity fields, checkout mode, transfer and return cutoffs, and single
+    /// tickets with compare-and-set and header replay. A change to single tickets names the dates
+    /// it opened or stopped in <c>singleTicketDates</c>.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> UpdateSeasonAsync(
         string seasonKey, SeasonUpdateRequest request, CancellationToken cancellationToken = default)
