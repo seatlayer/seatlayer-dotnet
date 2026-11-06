@@ -1430,9 +1430,20 @@ public sealed class SeasonsService
     public Task<IReadOnlyDictionary<string, object?>> CreateSeasonRenewalNoticesAsync(
         string seasonKey, IEnumerable<string>? offerIds = null,
         CancellationToken cancellationToken = default)
+        => CreateSeasonRenewalNoticesAsync(seasonKey, offerIds, null, cancellationToken);
+
+    /// <summary>
+    /// Emails renewal invitations now and reminders before the deadline. <paramref name="batchId"/>,
+    /// instead of offer ids, emails every open offer one <c>CreateSeasonRenewalOffersAsync</c> batch
+    /// made (its <c>batchId</c>). A null <paramref name="offerIds"/> or <paramref name="batchId"/>
+    /// sends none.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> CreateSeasonRenewalNoticesAsync(
+        string seasonKey, IEnumerable<string>? offerIds, string? batchId,
+        CancellationToken cancellationToken = default)
         => _client.PostAsync(
             Path(seasonKey, "/renewal-notices"),
-            Body.Of(("offerIds", offerIds?.ToList())),
+            Body.Of(("offerIds", offerIds?.ToList()), ("batchId", batchId)),
             null,
             cancellationToken);
 

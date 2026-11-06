@@ -552,6 +552,24 @@ public class SeasonTests
     }
 
     [Fact]
+    public async Task RenewalNoticesForOneOfferBatchSendItsBatchId()
+    {
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            (HttpStatusCode.OK, "{\"scheduled\":240,\"withoutEmail\":3}", new Dictionary<string, string>()),
+        });
+
+        var sent = await client.Seasons.CreateSeasonRenewalNoticesAsync("sea/a", null, "srb/1");
+
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal(HttpMethod.Post, call.Method);
+        Assert.Equal("https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-notices", call.Url.AbsoluteUri);
+        Assert.Equal(Canonical("{\"batchId\":\"srb/1\"}"), Canonical(call.Body!));
+        Assert.False(call.Headers.Contains("Idempotency-Key"));
+        Assert.Equal(240L, sent["scheduled"]);
+    }
+
+    [Fact]
     public async Task RenewalOffersAndBringAcrossAnswerAJobAboveOneHundred()
     {
         const string job = "{\"jobId\":\"sbj_1\",\"kind\":\"renewal_run\",\"state\":\"planning\","

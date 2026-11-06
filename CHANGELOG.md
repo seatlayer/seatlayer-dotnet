@@ -49,6 +49,7 @@
 - `CreateSeasonRenewalOffersAsync` answers `201 {offers}` for 100 contracts or fewer, and `202 {job, batchId}` above that: a `renewal_run` job makes the offers. Follow it with `RetrieveSeasonBulkJobAsync`, then page the offers with `ListSeasonRenewalOffersAsync`. It can refuse with `409 job_mismatch` or `503 season_not_configured`.
 - `CreateSeasonHolderImportFromSeasonAsync` answers `202 {job}` when a commit brings across more than 100 holders: a `holder_import` job, whose `summary` has the same counts when it completes. It can refuse with `409 job_mismatch`, `503 job_busy` or `503 season_not_configured`. A retrieved bulk job carries `summary`, empty until it completes.
 - `CreateSeasonRenewalNoticesAsync` takes up to 20,000 offer ids; more answers `422 too_many_offer_ids`.
+- A new `CreateSeasonRenewalNoticesAsync(seasonKey, offerIds, batchId)` overload takes `batchId` instead of offer ids: email every open offer one `CreateSeasonRenewalOffersAsync` batch made, such as the batch a `renewal_run` job made.
 
 ## 0.8.0 (2026-09-10)
 
