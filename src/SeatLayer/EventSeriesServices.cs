@@ -128,7 +128,12 @@ public sealed class EventSeriesUpdateRequest
     /// </summary>
     public IDictionary<string, object?>? Prices { get; set; }
 
-    /// <summary><c>on</c> or <c>off</c>: opens or pauses sales on every upcoming date.</summary>
+    /// <summary>
+    /// <c>on</c> or <c>off</c>: opens or pauses sales on every upcoming date. <c>on</c> never
+    /// opens a date its season cancelled: that date is a failed item of the job
+    /// (<c>season_date_cancelled</c>), counted in the job's <c>failed</c> but not in
+    /// <c>failedDates</c>, which are the dates that could not be made.
+    /// </summary>
     public string? Sales { get; set; }
 
     /// <summary>Optional key for exact server response replay.</summary>

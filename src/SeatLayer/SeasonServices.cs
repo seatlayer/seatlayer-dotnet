@@ -1084,7 +1084,8 @@ public sealed class SeasonsService
     /// Creates an audited occurrence amendment with exact header replay. A <c>cancel</c> also
     /// voids every live ticket for the date as a <c>date_cancel_void</c> job,
     /// <see cref="DateCancelVoidJobId"/> of the answer's <c>amendmentId</c>; follow it with
-    /// <see cref="RetrieveSeasonBulkJobAsync"/>.
+    /// <see cref="RetrieveSeasonBulkJobAsync"/>. A cancelled date can't be moved
+    /// (<c>reschedule</c>), postponed or replaced: <c>409 performance_cancelled</c>.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateSeasonAmendmentAsync(
         string seasonKey, SeasonAmendmentCreateRequest request,
@@ -1329,6 +1330,7 @@ public sealed class SeasonsService
 
     /// <summary>
     /// Marks a performance past so it stops blocking new Season sales, with header replay.
+    /// A cancelled date answers <c>409 performance_cancelled</c>.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> MarkSeasonPerformancePastAsync(
         string seasonKey, string eventKey, bool? force = null, string? idempotencyKey = null,

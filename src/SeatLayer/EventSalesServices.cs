@@ -256,7 +256,9 @@ public sealed partial class EventsService
 
     /// <summary>
     /// Moves an event's sales to testable, live, paused or ended. The expected revision stops
-    /// concurrent changes overwriting each other; the call is single-attempt.
+    /// concurrent changes overwriting each other; the call is single-attempt. A date its season
+    /// cancelled never opens again: moving it to <c>testable</c> or <c>live</c> answers
+    /// <c>409 season_date_cancelled</c>.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> TransitionEventSalesAsync(
         string eventKey, EventSalesTransitionRequest request,

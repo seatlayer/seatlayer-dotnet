@@ -570,7 +570,10 @@ public sealed partial class EventsService
         => _client.PostAsync(
             $"/v1/events/{SeatLayerClient.Escape(eventKey)}/close", null, null, cancellationToken);
 
-    /// <summary>Resumes buyer sales.</summary>
+    /// <summary>
+    /// Resumes buyer sales. A date its season cancelled never opens again:
+    /// <c>409 season_date_cancelled</c>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> ReopenAsync(
         string eventKey, CancellationToken cancellationToken = default)
         => _client.PostAsync(

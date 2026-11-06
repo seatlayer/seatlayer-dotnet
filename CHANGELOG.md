@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A date its season cancelled never opens again: `TransitionEventSalesAsync` to `testable` or
+  `live` and `ReopenAsync` answer `409 season_date_cancelled`, and `UpdateEventSeriesAsync` with
+  `Sales = "on"` leaves it closed as a failed item of the job (`season_date_cancelled`; not in
+  `failedDates`).
+- `CreateSeasonAmendmentAsync` refuses to move (`reschedule`), postpone or replace a cancelled
+  date, and `MarkSeasonPerformancePastAsync` refuses to mark one as taken place:
+  `409 performance_cancelled`.
 - `UpdateEventSeriesAsync` sends only the prices that change: each date keeps its own price for
   every category (or tier) left out, so weekend and weekday prices keep their difference.
 - A season's `TransferCutoffHours` / `ReturnCutoffHours` of null means the club default
