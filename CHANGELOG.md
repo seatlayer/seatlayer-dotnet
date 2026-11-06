@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Cancelling a date with `CreateSeasonAmendmentAsync` voids its tickets as a `date_cancel_void`
+  job, named by `SeasonsService.DateCancelVoidJobId(amendmentId)` (`sbj_void_…`); follow it with
+  `RetrieveSeasonBulkJobAsync`. `season.ticket.voided` says `date_cancelled` for each Season
+  ticket it voids.
+- A Season package holds 2 to 50 dates. `SeasonsService.HolderImportRowsPerCall(dates)` gives the
+  most rows one `CreateSeasonHolderImportAsync` call takes (100 up to 20 dates, 43 at 50); a call
+  with more answers `422 invalid_rows` with `maxRows` in the exception's `Body`.
+- `UpdateSeasonAsync` answers `singleTicketDates.jobRefused` when the `season_singles` job could
+  not start; the change stands, and sending `SingleTickets = true` again opens any date still not
+  open. An `UpdateSeasonAsync` retried with its first key and `ExpectedRevision` is not applied
+  twice.
+- A `CreateEventSeriesAsync` given up for its key answers `409 create_abandoned` with a message to
+  send it again with a new idempotency key.
 - `Seasons` grows from 48 to 87 operations: performances, package updates and prices, one-call
   publishing, checkout tests, occurrence returns and reclaims, holders, Season order refunds and
   cancellations, hosted renewal links, contacts and notices, renewal quotes, intents and

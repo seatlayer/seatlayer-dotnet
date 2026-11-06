@@ -431,6 +431,36 @@ public class SeasonTests
     }
 
     [Fact]
+    public async Task NamesTheDateCancelVoidJobAndSizesAHolderImportCallByItsDates()
+    {
+        Assert.Equal("sbj_void_amd_1", SeasonsService.DateCancelVoidJobId("amd_1"));
+        Assert.Equal(
+            new[] { 100, 100, 95, 43 },
+            new[] { 1, 20, 21, 50 }.Select(dates => SeasonsService.HolderImportRowsPerCall(dates)));
+
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            ((HttpStatusCode)422,
+                "{\"error\":\"invalid_rows\",\"code\":\"invalid_rows\","
+                + "\"message\":\"At most 43 rows a call for this package.\",\"maxRows\":43}",
+                new Dictionary<string, string>()),
+            Ok(),
+        }, maxRetries: 3);
+
+        var error = await Assert.ThrowsAsync<SeatLayerValidationException>(
+            () => client.Seasons.CreateSeasonHolderImportAsync("sea_1", new SeasonHolderImportRequest
+            {
+                SuccessorPlanActivationId = "spa_1",
+                Rows = Array.Empty<SeasonHolderImportRow>(),
+            }));
+
+        Assert.Equal(422, error.Status);
+        Assert.Equal("invalid_rows", error.Code);
+        Assert.Equal(43L, error.Body["maxRows"]);
+        Assert.Single(handler.Calls);
+    }
+
+    [Fact]
     public async Task CsvExportsReturnRawTextAndPlanDeleteReturnsNothing()
     {
         const string holders = "holder,email\nH-1,fan@example.com\n";

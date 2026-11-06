@@ -353,6 +353,40 @@ public class SalesOperationTests
     }
 
     [Fact]
+    public async Task GivenUpSeriesCreateAnswers409CreateAbandonedOnce()
+    {
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            (HttpStatusCode.Conflict,
+                "{\"error\":\"create_abandoned\",\"code\":\"create_abandoned\",\"message\":\"This series "
+                + "never started and was given up when another request came for the event. Send the "
+                + "request again with a new Idempotency-Key.\"}",
+                new Dictionary<string, string>()),
+            Ok(),
+            Ok(),
+        }, maxRetries: 3);
+
+        var error = await Assert.ThrowsAsync<SeatLayerConflictException>(
+            () => client.EventSeries.CreateEventSeriesAsync(new EventSeriesCreateRequest
+            {
+                FromEventKey = "ev_1",
+                Schedule = new EventSeriesSchedule
+                {
+                    Rule = "daily", From = "2026-11-06", Until = "2026-11-08", Times = new[] { "20:00" },
+                },
+                IdempotencyKey = "series-3",
+            }));
+
+        Assert.Equal("create_abandoned", error.Code);
+        Assert.Contains("new Idempotency-Key", error.Message);
+        Assert.Single(handler.Calls);
+        AssertCall(handler, 0, HttpMethod.Post, "https://api.seatlayer.io/v1/event-series",
+            "{\"fromEventKey\":\"ev_1\",\"schedule\":{\"rule\":\"daily\",\"from\":\"2026-11-06\","
+            + "\"until\":\"2026-11-08\",\"times\":[\"20:00\"]}}",
+            "series-3");
+    }
+
+    [Fact]
     public async Task RequestsWithOptionalBodiesSendEmptyObjects()
     {
         var (client, handler) = Build(Enumerable.Range(0, 3).Select(_ => Ok()));

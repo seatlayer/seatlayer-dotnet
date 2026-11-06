@@ -151,7 +151,11 @@ public sealed class EventSeriesService
     private static string Path(string eventKey, string suffix = "")
         => $"/v1/event-series/{SeatLayerClient.Escape(eventKey)}{suffix}";
 
-    /// <summary>Plans an event series from a schedule, or makes it as a job, with header replay.</summary>
+    /// <summary>
+    /// Plans an event series from a schedule, or makes it as a job, with header replay. A series
+    /// from an event that never started and was given up answers <c>409 create_abandoned</c> for
+    /// that key every time: send the request again with a new idempotency key.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateEventSeriesAsync(
         EventSeriesCreateRequest request, CancellationToken cancellationToken = default)
     {

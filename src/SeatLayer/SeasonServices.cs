@@ -696,6 +696,23 @@ public sealed class SeasonsService
             ("eventKeys", request.EventKeys?.ToList()),
             ("sourcePerformanceGroupKeys", request.SourcePerformanceGroupKeys?.ToList()));
 
+    /// <summary>
+    /// The id of the job voiding a cancelled date's tickets: <c>sbj_void_</c> and the cancel's
+    /// <c>amendmentId</c>. Cancelling a date starts it (a repeated cancel joins it); follow it with
+    /// <see cref="RetrieveSeasonBulkJobAsync"/>. Each Season ticket it voids is told by
+    /// <c>season.ticket.voided</c> with reason <c>date_cancelled</c>.
+    /// </summary>
+    public static string DateCancelVoidJobId(string amendmentId) => "sbj_void_" + amendmentId;
+
+    /// <summary>
+    /// The most rows one <see cref="CreateSeasonHolderImportAsync"/> call takes for a package of
+    /// <paramref name="dates"/> dates. Each row is fenced on every date: 100 up to 20 dates, then
+    /// <c>floor(2300 / (dates + 3))</c>, 43 at 50. A call with more answers
+    /// <c>422 invalid_rows</c> with <c>maxRows</c>.
+    /// </summary>
+    public static int HolderImportRowsPerCall(int dates)
+        => (int)Math.Max(1L, Math.Min(100L, 2300L / (Math.Max(1L, dates) + 3)));
+
     /// <summary>Lists Seasons.</summary>
     public async Task<Page> ListSeasonsAsync(
         SeasonListRequest? request = null, CancellationToken cancellationToken = default)
@@ -737,7 +754,10 @@ public sealed class SeasonsService
     /// <summary>
     /// Updates Season identity fields, checkout mode, transfer and return cutoffs, and single
     /// tickets with compare-and-set and header replay. A change to single tickets names the dates
-    /// it opened or stopped in <c>singleTicketDates</c>.
+    /// it opened or stopped in <c>singleTicketDates</c>; its <c>jobRefused</c> says why the
+    /// <c>season_singles</c> job could not start. The change still stands, and sending
+    /// <c>SingleTickets = true</c> again opens any date still not open. An exact retry with the
+    /// same <c>ExpectedRevision</c> and idempotency key is not applied twice.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> UpdateSeasonAsync(
         string seasonKey, SeasonUpdateRequest request, CancellationToken cancellationToken = default)
@@ -926,7 +946,12 @@ public sealed class SeasonsService
             Path(seasonKey, "/buyer-rehearsals/validate"),
             cancellationToken: cancellationToken);
 
-    /// <summary>Creates a dry-run or committed incumbent holder import with header replay.</summary>
+    /// <summary>
+    /// Creates a dry-run or committed incumbent holder import with header replay. A call takes at
+    /// most <see cref="HolderImportRowsPerCall"/> rows for the package's dates (100 up to 20
+    /// dates); more answers <c>422 invalid_rows</c> with <c>maxRows</c> in the exception's
+    /// <c>Body</c>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateSeasonHolderImportAsync(
         string seasonKey, SeasonHolderImportRequest request,
         CancellationToken cancellationToken = default)
@@ -1054,7 +1079,12 @@ public sealed class SeasonsService
         string seasonKey, CancellationToken cancellationToken = default)
         => _client.GetAsync(Path(seasonKey, "/occurrences"), null, cancellationToken);
 
-    /// <summary>Creates an audited occurrence amendment with exact header replay.</summary>
+    /// <summary>
+    /// Creates an audited occurrence amendment with exact header replay. A <c>cancel</c> also
+    /// voids every live ticket for the date as a <c>date_cancel_void</c> job,
+    /// <see cref="DateCancelVoidJobId"/> of the answer's <c>amendmentId</c>; follow it with
+    /// <see cref="RetrieveSeasonBulkJobAsync"/>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateSeasonAmendmentAsync(
         string seasonKey, SeasonAmendmentCreateRequest request,
         CancellationToken cancellationToken = default)
@@ -1573,7 +1603,8 @@ public sealed class SeasonsService
 
     /// <summary>
     /// Retrieves one bulk job with its counts, up to 500 failed items, and the <c>summary</c> it
-    /// ended with (empty until it completes). Job kinds include <c>holder_import</c>.
+    /// ended with (empty until it completes). Job kinds include <c>holder_import</c> and
+    /// <c>date_cancel_void</c>.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonBulkJobAsync(
         string seasonKey, string jobId, CancellationToken cancellationToken = default)
