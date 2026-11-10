@@ -34,9 +34,9 @@ public class SeasonTests
     }
 
     [Fact]
-    public async Task MapsAll87SeasonOperationsAndExactReplayClasses()
+    public async Task MapsAll90SeasonOperationsAndExactReplayClasses()
     {
-        var (client, handler) = Build(Enumerable.Range(0, 87).Select(_ => Ok()));
+        var (client, handler) = Build(Enumerable.Range(0, 90).Select(_ => Ok()));
         var seasons = client.Seasons;
 
         await seasons.ListSeasonsAsync(new SeasonListRequest
@@ -240,6 +240,18 @@ public class SeasonTests
             BuyerName = "Ana Silva", Provider = "stripe", IdempotencyKey = "renew-1",
         });
         await seasons.ReleaseSeasonLapsedOffersAsync("sea/a");
+        // Season seats: set aside, read, release (phase 4).
+        await seasons.SetAsideSeasonBlockAsync("sea/a", new SeasonBlockSetAsideRequest
+        {
+            ExpectedRevision = 7, KeepForSingleTickets = new SeasonSeatSelection { Labels = new[] { "A-6" } },
+            IdempotencyKey = "block-1",
+        });
+        await seasons.RetrieveSeasonBlockAsync("sea/a");
+        await seasons.ReleaseSeasonBlockAsync("sea/a", new SeasonBlockReleaseRequest
+        {
+            ExpectedRevision = 7, Scope = new SeasonBlockReleaseScope { All = true }, EventKeys = new[] { "ev/1" },
+            At = "2026-12-01T10:00:00Z", Reason = "Unsold",
+        });
 
         var expected = new (HttpMethod Method, string Url)[]
         {
@@ -330,9 +342,12 @@ public class SeasonTests
             (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/offer%2F1/intent"),
             (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/offer%2F1/checkout"),
             (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/renewal-offers/release-lapsed"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/block"),
+            (HttpMethod.Get, "https://api.seatlayer.io/v1/seasons/sea%2Fa/block"),
+            (HttpMethod.Post, "https://api.seatlayer.io/v1/seasons/sea%2Fa/block/release"),
         };
 
-        Assert.Equal(87, handler.Calls.Count);
+        Assert.Equal(90, handler.Calls.Count);
         Assert.Null(handler.Calls[26].Body);
         Assert.Equal(expected.Length, handler.Calls.Count);
         for (var index = 0; index < expected.Length; index++)
@@ -351,8 +366,9 @@ public class SeasonTests
             [55] = null, [56] = null, [58] = "prices-1", [60] = "plan-perf-1",
             [61] = "plan-perf-2", [62] = "past-1", [66] = "refund-1", [67] = "cancel-order-1",
             [68] = "cancel-date-1", [80] = "refund-date-1", [85] = "renew-1", [86] = null,
+            [87] = "block-1", [89] = null,
         };
-        Assert.Equal(26, replayKeys.Count);
+        Assert.Equal(28, replayKeys.Count);
         for (var index = 0; index < handler.Calls.Count; index++)
         {
             if (replayKeys.TryGetValue(index, out var key))
@@ -415,8 +431,11 @@ public class SeasonTests
             [84] = null,
             [85] = "{\"returnUrl\":\"https://tickets.example/renewed\",\"buyerEmail\":\"ana@example.com\",\"buyerName\":\"Ana Silva\",\"provider\":\"stripe\"}",
             [86] = null,
+            [87] = "{\"expectedRevision\":7,\"keepForSingleTickets\":{\"labels\":[\"A-6\"]}}",
+            [88] = null,
+            [89] = "{\"expectedRevision\":7,\"scope\":{\"all\":true},\"eventKeys\":[\"ev/1\"],\"at\":\"2026-12-01T10:00:00Z\",\"reason\":\"Unsold\"}",
         };
-        Assert.Equal(39, bodies.Count);
+        Assert.Equal(42, bodies.Count);
         foreach (var (index, body) in bodies)
         {
             if (body is null)
@@ -498,6 +517,56 @@ public class SeasonTests
         var keys = handler.Calls.Select(call => call.Headers.GetValues("Idempotency-Key").Single()).ToList();
         Assert.False(string.IsNullOrEmpty(keys[0]));
         Assert.Equal(keys[0], keys[1]);
+    }
+
+    [Fact]
+    public async Task SeasonSeatsAnswersReachTheCaller()
+    {
+        const string pending = "{\"state\":\"finishing\",\"code\":\"block_date_leave_pending\",\"retryable\":true,"
+            + "\"eventKey\":\"ev_1\",\"shardsLeft\":[1],\"shardCount\":2,\"message\":\"Still leaving one shard\"}";
+        var codes = new[]
+        {
+            "season_block_not_enabled", "block_exists", "season_block_set_aside", "season_inventory_locked",
+            "date_leave_in_progress",
+        };
+        var none = new Dictionary<string, string>();
+        var responses = new List<(HttpStatusCode, string, IDictionary<string, string>)>
+        {
+            (HttpStatusCode.Accepted, "{\"job\":{\"jobId\":\"sbsa_sbp_1\",\"kind\":\"season_block_set_aside\",\"state\":\"running\"},\"block\":{\"mode\":\"per_hold\"}}", none),
+            (HttpStatusCode.OK, "{\"job\":{\"jobId\":\"sbr_1\",\"kind\":\"season_block_release\",\"state\":\"planning\"}}", none),
+            (HttpStatusCode.Accepted, pending, new Dictionary<string, string> { ["Retry-After"] = "2" }),
+            (HttpStatusCode.Accepted, pending, none),
+        };
+        responses.AddRange(codes.Select(code =>
+            ((HttpStatusCode)409, "{\"error\":\"" + code + "\",\"code\":\"" + code + "\"}", (IDictionary<string, string>)none)));
+        var (client, handler) = Build(responses);
+        var seasons = client.Seasons;
+
+        var setAside = await seasons.SetAsideSeasonBlockAsync("sea_1", new SeasonBlockSetAsideRequest { ExpectedRevision = 7 });
+        var job = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(setAside["job"]);
+        Assert.Equal("season_block_set_aside", job["kind"]);
+        // Nothing kept back: no keepForSingleTickets, and the key is generated.
+        Assert.Equal(Canonical("{\"expectedRevision\":7}"), Canonical(handler.Calls[0].Body!));
+        Assert.False(string.IsNullOrEmpty(handler.Calls[0].Headers.GetValues("Idempotency-Key").Single()));
+        // A job of a kind this SDK did not know before reads as any other.
+        var release = await seasons.RetrieveSeasonBulkJobAsync("sea_1", "sbr_1");
+        Assert.Equal("season_block_release", Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(release["job"])["kind"]);
+        Assert.True(SeasonsService.IsDateLeavePending(await seasons.CreateSeasonAmendmentAsync(
+            "sea_1", new SeasonAmendmentCreateRequest { EventKey = "ev_1", Kind = "cancel" })));
+        Assert.True(SeasonsService.IsDateLeavePending(await seasons.MarkSeasonPerformancePastAsync("sea_1", "ev_1")));
+        Assert.False(SeasonsService.IsDateLeavePending(new Dictionary<string, object?> { ["amendment"] = "am_1" }));
+        Assert.False(SeasonsService.IsDateLeavePending(new Dictionary<string, object?> { ["state"] = "finishing", ["code"] = "season_busy" }));
+        Assert.False(SeasonsService.IsDateLeavePending(new Dictionary<string, object?> { ["state"] = "done", ["code"] = "block_date_leave_pending" }));
+        Assert.False(SeasonsService.IsDateLeavePending(null));
+        foreach (var code in codes)
+        {
+            var error = await Assert.ThrowsAsync<SeatLayerConflictException>(() => seasons.ReleaseSeasonBlockAsync(
+                "sea_1", new SeasonBlockReleaseRequest
+                {
+                    ExpectedRevision = 7, Scope = new SeasonBlockReleaseScope { Labels = new[] { "A-1" } },
+                }));
+            Assert.Equal(code, error.Code);
+        }
     }
 
     [Fact]
@@ -619,6 +688,95 @@ public class SeasonTests
             Canonical("{\"expectedRevision\":6,\"name\":\"Series 2\"}"), Canonical(handler.Calls[2].Body!));
         var dates = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(answer["singleTicketDates"]);
         Assert.Equal("open", dates["direction"]);
+    }
+
+    [Fact]
+    public async Task InventoryModeReachesTheWireOnlyWhenGivenAndReadsBack()
+    {
+        var none = new Dictionary<string, string>();
+        const string block = "{\"season\":{\"key\":\"sea_1\",\"revision\":5,\"inventoryMode\":\"block\"}}";
+        const string perHold = "{\"season\":{\"key\":\"sea_2\",\"revision\":1,\"inventoryMode\":\"per_hold\"}}";
+        const string list = "{\"seasons\":[{\"key\":\"sea_1\",\"inventoryMode\":\"block\"},"
+            + "{\"key\":\"sea_2\",\"inventoryMode\":\"per_hold\"}],\"nextCursor\":null}";
+        var (client, handler) = Build(new (HttpStatusCode, string, IDictionary<string, string>)[]
+        {
+            (HttpStatusCode.Created, block, none),
+            (HttpStatusCode.Created, perHold, none),
+            (HttpStatusCode.OK, block, none),
+            (HttpStatusCode.OK, perHold, none),
+            (HttpStatusCode.OK, perHold, none),
+            (HttpStatusCode.OK, block, none),
+            (HttpStatusCode.OK, list, none),
+        });
+        var seasons = client.Seasons;
+
+        var created = await seasons.CreateSeasonAsync(new SeasonCreateRequest
+        {
+            Name = "Series", EventKeys = new[] { "ev_1", "ev_2" }, InventoryMode = "block",
+            IdempotencyKey = "create-1",
+        });
+        await seasons.CreateSeasonAsync(new SeasonCreateRequest { Name = "Series", EventKeys = new[] { "ev_1", "ev_2" } });
+        var turnedOn = await seasons.UpdateSeasonAsync("sea_1", new SeasonUpdateRequest
+        {
+            ExpectedRevision = 5, InventoryMode = "block", IdempotencyKey = "update-1",
+        });
+        await seasons.UpdateSeasonAsync("sea_1", new SeasonUpdateRequest { ExpectedRevision = 5, InventoryMode = "per_hold" });
+        await seasons.UpdateSeasonAsync("sea_1", new SeasonUpdateRequest { ExpectedRevision = 5, Name = "Series 2" });
+        var retrieved = await seasons.RetrieveSeasonAsync("sea_1");
+        var listed = await seasons.ListSeasonsAsync();
+
+        Assert.Equal(
+            new[] { HttpMethod.Post, HttpMethod.Post, HttpMethod.Patch, HttpMethod.Patch, HttpMethod.Patch, HttpMethod.Get, HttpMethod.Get },
+            handler.Calls.Select(call => call.Method));
+        Assert.Equal(
+            Canonical("{\"eventKeys\":[\"ev_1\",\"ev_2\"],\"name\":\"Series\",\"inventoryMode\":\"block\"}"),
+            Canonical(handler.Calls[0].Body!));
+        Assert.Equal(
+            Canonical("{\"eventKeys\":[\"ev_1\",\"ev_2\"],\"name\":\"Series\"}"), Canonical(handler.Calls[1].Body!));
+        Assert.Equal(
+            Canonical("{\"expectedRevision\":5,\"inventoryMode\":\"block\"}"), Canonical(handler.Calls[2].Body!));
+        Assert.Equal(
+            Canonical("{\"expectedRevision\":5,\"inventoryMode\":\"per_hold\"}"), Canonical(handler.Calls[3].Body!));
+        Assert.Equal(
+            Canonical("{\"expectedRevision\":5,\"name\":\"Series 2\"}"), Canonical(handler.Calls[4].Body!));
+        Assert.Equal("https://api.seatlayer.io/v1/seasons/sea_1", handler.Calls[5].Url.AbsoluteUri);
+        foreach (var answer in new[] { created, turnedOn, retrieved })
+        {
+            var season = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(answer["season"]);
+            Assert.Equal("block", season["inventoryMode"]);
+        }
+
+        Assert.Equal(new[] { "block", "per_hold" }, listed.Items.Select(item => item["inventoryMode"]));
+    }
+
+    [Fact]
+    public async Task InventoryModeRefusalsAndBlockNotReadyCarryTheirCode()
+    {
+        var none = new Dictionary<string, string>();
+        var refusals = new (int Status, string Code)[]
+        {
+            (409, "season_block_packages"), (409, "season_block_on_sale"), (409, "season_not_draft_or_active"),
+            (409, "season_block_exists"), (422, "invalid_inventory_mode"),
+        };
+        var responses = refusals
+            .Select(refusal => ((HttpStatusCode)refusal.Status,
+                "{\"error\":\"" + refusal.Code + "\",\"code\":\"" + refusal.Code + "\"}", (IDictionary<string, string>)none))
+            .Append(((HttpStatusCode)409, "{\"error\":\"block_not_ready\",\"code\":\"block_not_ready\"}", none))
+            .ToList();
+        var (client, handler) = Build(responses);
+        var seasons = client.Seasons;
+
+        foreach (var (status, code) in refusals)
+        {
+            var error = await Assert.ThrowsAnyAsync<SeatLayerException>(() => seasons.UpdateSeasonAsync(
+                "sea_1", new SeasonUpdateRequest { ExpectedRevision = 5, InventoryMode = "block" }));
+            Assert.Equal(status, error.Status);
+            Assert.Equal(code, error.Code);
+        }
+
+        var notReady = await Assert.ThrowsAsync<SeatLayerConflictException>(() => seasons.OpenSeasonSalesAsync("sea_1", 5));
+        Assert.Equal("block_not_ready", notReady.Code);
+        Assert.Equal(refusals.Length + 1, handler.Calls.Count);
     }
 
     [Fact]
