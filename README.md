@@ -175,6 +175,56 @@ no body. On request types where a field can be cleared (`SeasonRenewalContactReq
 `SeasonUpdateRequest`), assigning `null` sends
 `null`, and leaving the property unassigned leaves the field out.
 
+### Season seats
+
+Season seats are the seats a season sets aside on every date before its sales open. A season
+buyer's hold then doesn't have to ask each date, and single-ticket buyers see those seats as
+unavailable. They are off for every season until you set `InventoryMode = "block"` on
+`SeasonCreateRequest` or `SeasonUpdateRequest`. The season needs one package, and its sales must
+not have opened. Turning them on keeps the season's revision.
+
+```csharp
+await client.Seasons.UpdateSeasonAsync(seasonKey,
+    new SeasonUpdateRequest { ExpectedRevision = revision, InventoryMode = "block" });
+
+var answer = await client.Seasons.SetAsideSeasonBlockAsync(seasonKey, new SeasonBlockSetAsideRequest
+{
+    ExpectedRevision = revision,
+    KeepForSingleTickets = new SeasonSeatSelection { SectionIds = new[] { "sec_family" } },
+});
+var job = (IReadOnlyDictionary<string, object?>)answer["job"]!;
+while (job["state"] is "planning" or "running")
+{
+    await Task.Delay(TimeSpan.FromSeconds(2));
+    var read = await client.Seasons.RetrieveSeasonBulkJobAsync(seasonKey, (string)job["jobId"]!);
+    job = (IReadOnlyDictionary<string, object?>)read["job"]!;
+}
+var block = await client.Seasons.RetrieveSeasonBlockAsync(seasonKey);
+
+// Release unsold season seats to single sale. Leave At null to release now.
+await client.Seasons.ReleaseSeasonBlockAsync(seasonKey, new SeasonBlockReleaseRequest
+{
+    ExpectedRevision = revision,
+    Scope = new SeasonBlockReleaseScope { All = true },
+    At = "2026-12-01T09:00:00Z",
+});
+```
+
+- On an active season, block mode turns on by itself once every date has the seats, and
+  `season.block.ready` is sent once. On a draft, `PublishSeasonAsync` turns it on.
+  `season.block.released` is sent once a release has run.
+- In block mode, a date cancel (`CreateSeasonAmendmentAsync`, kind `cancel`) or
+  `MarkSeasonPerformancePastAsync` first takes the date off every season seat. Until that finishes
+  the answer is a `202`: check it with `SeasonsService.IsDateLeavePending(answer)`, then send the
+  same request again after `Retry-After`.
+- Refusals come through `SeatLayerException` with `Code`, and nothing changes. For example
+  `409 season_block_packages` (more than one package), `409 season_block_on_sale` (sales have
+  opened), or `409 block_not_ready` from `OpenSeasonSalesAsync` before block mode is on.
+- A partner's seat on a date (one a sales channel sells there) stays out of the block. It is
+  listed in the block's `notFreeOnEveryDate` with reason `channel`.
+
+The [Season seats docs](https://docs.seatlayer.io/server-api/seasons/#season-seats) list every refusal.
+
 ## Test vs live
 
 Keys carry their own mode. `sk_test_…` keys can only touch test-mode events and `sk_live_…` only

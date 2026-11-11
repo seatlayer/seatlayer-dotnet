@@ -51,6 +51,15 @@ public sealed class SeasonCreateRequest : SeasonSelectionRequest
     /// </summary>
     public bool? SingleTickets { get; set; }
 
+    /// <summary>
+    /// <c>block</c> turns season seats on for this Season. Left out when null; the default is
+    /// <c>per_hold</c>, and anything else answers <c>422 invalid_inventory_mode</c>. Every Season
+    /// answer carries <c>inventoryMode</c>: how the season's seats are decided, <c>block</c> once
+    /// season seats are turned on for it (<c>inventoryMode: "block"</c> on create or update) or it
+    /// sells from its block, else <c>per_hold</c>.
+    /// </summary>
+    public string? InventoryMode { get; set; }
+
     /// <summary>Optional key for exact server response replay.</summary>
     public string? IdempotencyKey { get; set; }
 }
@@ -85,6 +94,16 @@ public sealed class SeasonUpdateRequest
     /// Left out when null.
     /// </summary>
     public bool? SingleTickets { get; set; }
+
+    /// <summary>
+    /// <c>block</c> turns season seats on for this Season; <c>per_hold</c> turns them off again,
+    /// refused with <c>409 season_block_exists</c> once seats are set aside. It does not change the
+    /// Season's <c>revision</c>. Refused with <c>409 season_block_packages</c> (more than one
+    /// package), <c>409 season_block_on_sale</c> (sales already opened without season seats),
+    /// <c>409 season_not_draft_or_active</c>, or <c>422 invalid_inventory_mode</c>. Left out when
+    /// null.
+    /// </summary>
+    public string? InventoryMode { get; set; }
 
     /// <summary>
     /// Hours (0 to 720) before a date starts that its tickets stop being sent to others. Left out
@@ -131,7 +150,8 @@ public sealed class SeasonUpdateRequest
             ("edition", Edition),
             ("checkoutMode", CheckoutMode),
             ("audience", Audience),
-            ("singleTickets", SingleTickets));
+            ("singleTickets", SingleTickets),
+            ("inventoryMode", InventoryMode));
         // Body.Of drops nulls, but an assigned null cutoff means "until the date starts".
         if (_transferCutoffHoursSet)
         {
@@ -321,6 +341,84 @@ public sealed class SeasonRenewalCheckoutRequest
         ("buyerEmail", BuyerEmail),
         ("buyerName", BuyerName),
         ("provider", Provider));
+}
+
+/// <summary>Seats kept for single tickets, or released: by section, category or label.</summary>
+public sealed class SeasonSeatSelection
+{
+    /// <summary>Whole sections.</summary>
+    public IEnumerable<string>? SectionIds { get; set; }
+
+    /// <summary>Every seat of these categories.</summary>
+    public IEnumerable<string>? CategoryKeys { get; set; }
+
+    /// <summary>Single seats, by label.</summary>
+    public IEnumerable<string>? Labels { get; set; }
+
+    internal Dictionary<string, object?> ToBody() => Body.Of(
+        ("sectionIds", SectionIds?.ToList()),
+        ("categoryKeys", CategoryKeys?.ToList()),
+        ("labels", Labels?.ToList()));
+}
+
+/// <summary>Sets a Season's seats aside on every date.</summary>
+public sealed class SeasonBlockSetAsideRequest
+{
+    /// <summary>The Season revision you read; another answers <c>409 revision_mismatch</c>.</summary>
+    public required long ExpectedRevision { get; set; }
+
+    /// <summary>
+    /// Left out of the block: kept for single tickets. Null keeps nothing back, so the block is every
+    /// seat the packages price.
+    /// </summary>
+    public SeasonSeatSelection? KeepForSingleTickets { get; set; }
+
+    /// <summary>Optional key for exact server response replay.</summary>
+    public string? IdempotencyKey { get; set; }
+}
+
+/// <summary>What a release covers: every unsold seat (<see cref="All"/>), or one of the lists.</summary>
+public sealed class SeasonBlockReleaseScope
+{
+    /// <summary>True: every unsold seat.</summary>
+    public bool? All { get; set; }
+
+    /// <summary>Whole sections.</summary>
+    public IEnumerable<string>? SectionIds { get; set; }
+
+    /// <summary>Every seat of these categories.</summary>
+    public IEnumerable<string>? CategoryKeys { get; set; }
+
+    /// <summary>Single seats, by label.</summary>
+    public IEnumerable<string>? Labels { get; set; }
+
+    internal Dictionary<string, object?> ToBody() => Body.Of(
+        ("all", All),
+        ("sectionIds", SectionIds?.ToList()),
+        ("categoryKeys", CategoryKeys?.ToList()),
+        ("labels", Labels?.ToList()));
+}
+
+/// <summary>Releases season seats to single sale.</summary>
+public sealed class SeasonBlockReleaseRequest
+{
+    /// <summary>The Season revision you read; another answers <c>409 revision_mismatch</c>.</summary>
+    public required long ExpectedRevision { get; set; }
+
+    /// <summary>What the release covers.</summary>
+    public required SeasonBlockReleaseScope Scope { get; set; }
+
+    /// <summary>Release on these dates only. Null: every date still to come.</summary>
+    public IEnumerable<string>? EventKeys { get; set; }
+
+    /// <summary>An ISO time to release at. Null: now.</summary>
+    public string? At { get; set; }
+
+    /// <summary>Kept on the release.</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>Optional key for exact server response replay.</summary>
+    public string? IdempotencyKey { get; set; }
 }
 
 /// <summary>Creates an audited occurrence amendment.</summary>
@@ -714,6 +812,19 @@ public sealed class SeasonsService
     public static int HolderImportRowsPerCall(int dates)
         => (int)Math.Max(1L, Math.Min(100L, 2300L / (Math.Max(1L, dates) + 3)));
 
+    /// <summary>
+    /// Whether an answer is the <c>202</c> a season-seats season's date cancel
+    /// (<see cref="CreateSeasonAmendmentAsync"/>) or past date
+    /// (<see cref="MarkSeasonPerformancePastAsync"/>) sends while the date is still leaving every
+    /// season seat: <c>state</c> <c>finishing</c>, <c>code</c> <c>block_date_leave_pending</c>, with
+    /// <c>eventKey</c>, <c>shardsLeft</c> and <c>shardCount</c>. It finishes by itself: send the same
+    /// request again after <c>Retry-After</c> to read how it ended.
+    /// </summary>
+    public static bool IsDateLeavePending(IReadOnlyDictionary<string, object?>? answer)
+        => answer is not null
+            && answer.TryGetValue("state", out var state) && state is "finishing"
+            && answer.TryGetValue("code", out var code) && code is "block_date_leave_pending";
+
     /// <summary>Lists Seasons.</summary>
     public async Task<Page> ListSeasonsAsync(
         SeasonListRequest? request = null, CancellationToken cancellationToken = default)
@@ -741,6 +852,11 @@ public sealed class SeasonsService
         if (request.SingleTickets is not null)
         {
             body["singleTickets"] = request.SingleTickets;
+        }
+
+        if (request.InventoryMode is not null)
+        {
+            body["inventoryMode"] = request.InventoryMode;
         }
 
         return _client.PostHeaderReplayAsync(
@@ -839,7 +955,8 @@ public sealed class SeasonsService
     /// Opens Season sales. The answer's <c>warnings</c> say what is advised but not required, such
     /// as <c>checkout_test_missing</c> until a checkout test or rehearsal has passed. Refused with
     /// <c>409 plan_not_published</c> or <c>409 checkout_mode_not_chosen</c> until a package is
-    /// published and a checkout mode is chosen.
+    /// published and a checkout mode is chosen, and with <c>409 block_not_ready</c> when season
+    /// seats are turned on (<c>InventoryMode = "block"</c>) but the seats are not set aside yet.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> OpenSeasonSalesAsync(
         string seasonKey, long expectedRevision, CancellationToken cancellationToken = default)
@@ -1085,7 +1202,10 @@ public sealed class SeasonsService
     /// voids every live ticket for the date as a <c>date_cancel_void</c> job,
     /// <see cref="DateCancelVoidJobId"/> of the answer's <c>amendmentId</c>; follow it with
     /// <see cref="RetrieveSeasonBulkJobAsync"/>. A cancelled date can't be moved
-    /// (<c>reschedule</c>), postponed or replaced: <c>409 performance_cancelled</c>.
+    /// (<c>reschedule</c>), postponed or replaced: <c>409 performance_cancelled</c>. On a
+    /// season-seats season, a <c>cancel</c> first takes the date off every season seat: while that
+    /// finishes the answer is a <c>202</c> (check with <see cref="IsDateLeavePending"/>); send the
+    /// same request again to read the amendment.
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> CreateSeasonAmendmentAsync(
         string seasonKey, SeasonAmendmentCreateRequest request,
@@ -1330,7 +1450,9 @@ public sealed class SeasonsService
 
     /// <summary>
     /// Marks a performance past so it stops blocking new Season sales, with header replay.
-    /// A cancelled date answers <c>409 performance_cancelled</c>.
+    /// A cancelled date answers <c>409 performance_cancelled</c>. On a season-seats season the date
+    /// first leaves every season seat: while that finishes the answer is a <c>202</c> (check with
+    /// <see cref="IsDateLeavePending"/>).
     /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> MarkSeasonPerformancePastAsync(
         string seasonKey, string eventKey, bool? force = null, string? idempotencyKey = null,
@@ -1613,6 +1735,54 @@ public sealed class SeasonsService
         string seasonKey, string jobId, CancellationToken cancellationToken = default)
         => _client.GetAsync(
             Path(seasonKey, $"/jobs/{SeatLayerClient.Escape(jobId)}"), null, cancellationToken);
+
+    /// <summary>
+    /// Sets the Season's seats aside on every date: every seat its packages price, minus
+    /// <see cref="SeasonBlockSetAsideRequest.KeepForSingleTickets"/>, with header replay: a retry
+    /// with the same key replays the same answer. Answers <c>202 {job, block}</c>: a
+    /// <c>season_block_set_aside</c> job to follow with <see cref="RetrieveSeasonBulkJobAsync"/>. On
+    /// an active Season block mode turns on by itself once every date has the seats
+    /// (<c>season.block.ready</c>); on a draft, Publish turns it on. Season seats must be on for the
+    /// Season (<c>409 season_block_not_enabled</c> otherwise).
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> SetAsideSeasonBlockAsync(
+        string seasonKey, SeasonBlockSetAsideRequest request, CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            Path(seasonKey, "/block"),
+            Body.Of(
+                ("expectedRevision", request.ExpectedRevision),
+                ("keepForSingleTickets", request.KeepForSingleTickets?.ToBody())),
+            request.IdempotencyKey,
+            cancellationToken);
+
+    /// <summary>
+    /// Retrieves the Season's seats set aside on every date: <c>block</c> with its <c>mode</c>
+    /// (<c>block</c> once on, else <c>per_hold</c>), <c>state</c>, <c>counts</c> and each date's
+    /// <c>state</c>.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> RetrieveSeasonBlockAsync(
+        string seasonKey, CancellationToken cancellationToken = default)
+        => _client.GetAsync(Path(seasonKey, "/block"), null, cancellationToken);
+
+    /// <summary>
+    /// Releases season seats to single sale: every unsold seat, or the sections, categories or seats
+    /// named, with header replay: a retry with the same key replays the same release. Answers
+    /// <c>202 {job, block}</c>: a <c>season_block_release</c> job to follow with
+    /// <see cref="RetrieveSeasonBulkJobAsync"/>. <c>season.block.released</c> is sent once it has run
+    /// on every date.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, object?>> ReleaseSeasonBlockAsync(
+        string seasonKey, SeasonBlockReleaseRequest request, CancellationToken cancellationToken = default)
+        => _client.PostHeaderReplayAsync(
+            Path(seasonKey, "/block/release"),
+            Body.Of(
+                ("expectedRevision", request.ExpectedRevision),
+                ("scope", request.Scope.ToBody()),
+                ("eventKeys", request.EventKeys?.ToList()),
+                ("at", request.At),
+                ("reason", request.Reason)),
+            request.IdempotencyKey,
+            cancellationToken);
 
     private Task<IReadOnlyDictionary<string, object?>> LifecycleAsync(
         string seasonKey, string action, long expectedRevision, CancellationToken cancellationToken)
