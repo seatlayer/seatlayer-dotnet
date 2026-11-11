@@ -251,6 +251,9 @@ public sealed class SeatLayerClient : IDisposable
 
         for (var attempt = 0; attempt < _maxRetries; attempt++)
         {
+            // A cancelled token stops the call here, before anything is sent. HttpClient
+            // checks it too, but not every runtime does so before the handler runs.
+            cancellationToken.ThrowIfCancellationRequested();
             using var request = new HttpRequestMessage(method, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _secretKey);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
