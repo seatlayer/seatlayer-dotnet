@@ -651,6 +651,22 @@ public class ClientTests
     }
 
     [Fact]
+    public async Task EventsFilterBySeries()
+    {
+        var (client, handler) = Build(new[] { Ok("{\"events\":[]}"), Ok("{\"events\":[]}") });
+        await client.Events.ListAsync(new EventListRequest { SeriesKey = "ser a/b", Limit = 10 });
+        await foreach (var _ in client.Events.ListAllAsync(new EventListRequest { SeriesKey = "ser_1" }))
+        {
+            // drain
+        }
+
+        Assert.Equal(
+            "https://api.seatlayer.io/v1/events?limit=10&seriesKey=ser+a%2fb",
+            handler.Calls[0].Url.AbsoluteUri);
+        Assert.Contains("seriesKey=ser_1", handler.Calls[1].Url.ToString());
+    }
+
+    [Fact]
     public async Task SinglePageKeepsCounts()
     {
         var (client, handler) = Build(new[] { Ok("{\"events\":[]}") });

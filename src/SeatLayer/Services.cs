@@ -294,6 +294,9 @@ public sealed class EventListRequest
     /// </summary>
     public bool Counts { get; set; } = true;
 
+    /// <summary>Only the dates of this event series.</summary>
+    public string? SeriesKey { get; set; }
+
     internal Dictionary<string, string?> ToQuery()
     {
         var query = new Dictionary<string, string?>
@@ -308,6 +311,7 @@ public sealed class EventListRequest
             query["counts"] = "0";
         }
 
+        query["seriesKey"] = SeriesKey;
         return query;
     }
 }
@@ -403,8 +407,11 @@ public sealed class EventConfigurationBindingUpdateRequest
     public EventConfigurationReference? Configuration { get; set; }
 }
 
-/// <summary>Event lifecycle, metadata and reports.</summary>
-public sealed class EventsService
+/// <summary>
+/// Event lifecycle, metadata and reports, and event sales setup: who takes payment, the payment
+/// gateway, sales readiness and state, the booking fee, and discount codes.
+/// </summary>
+public sealed partial class EventsService
 {
     private readonly SeatLayerClient _client;
 
@@ -563,7 +570,10 @@ public sealed class EventsService
         => _client.PostAsync(
             $"/v1/events/{SeatLayerClient.Escape(eventKey)}/close", null, null, cancellationToken);
 
-    /// <summary>Resumes buyer sales.</summary>
+    /// <summary>
+    /// Resumes buyer sales. A date its season cancelled never opens again:
+    /// <c>409 season_date_cancelled</c>.
+    /// </summary>
     public Task<IReadOnlyDictionary<string, object?>> ReopenAsync(
         string eventKey, CancellationToken cancellationToken = default)
         => _client.PostAsync(
