@@ -116,11 +116,12 @@ reports, CSV exports, audit and support export. The bulk refund of a cancelled d
 Validate compatible events before creation, then keep the secret key on your server and give the
 browser `SeasonPicker` only the show-once, origin-bound buyer token.
 
-After the test hold/book/cancel journey and matching webhook deliveries,
-`ValidateSeasonBuyerRehearsalAsync(seasonKey)` sends no evidence body; SeatLayer discovers the
-retained chain automatically. Retrieved Season holds contain inventory identity, not an
-authoritative amount. Your platform owns package price, payment, order, tax, refunds, benefits,
-and ticket or pass delivery.
+Before you open sales, run one test hold, booking and cancellation with their webhooks, then call
+`ValidateSeasonBuyerRehearsalAsync(seasonKey)`. It finds those test records itself, so it takes no
+body. Until a test like this or a checkout test has passed, opening sales answers with a
+`checkout_test_missing` warning. A season hold lists each date's seat, category and quantity but no
+price: when you run your own checkout, you set the package price and take the payment, and you
+issue the tickets.
 
 ```csharp
 var validation = await client.Seasons.ValidateSeasonAsync(new SeasonSelectionRequest
@@ -136,9 +137,11 @@ var created = await client.Seasons.CreateSeasonAsync(new SeasonCreateRequest
 });
 ```
 
-Season lifecycle, booking, cancellation, and renewal commits are domain-idempotent and therefore
-remain single-attempt. The 26 Season operations with exact header replay are retried; the full
-client has 41 exact-header-replay mutations.
+A `202` answer means the work was accepted and is still running: keep the returned operation id and
+poll `RetrieveSeasonLifecycleAsync` until it finishes. Bookings, cancellations and renewal commits
+are sent once and never retried by the SDK, so give each one your own stable id; sending the same
+id again is safe. A buyer session is sent once too, but it cannot be repeated: if its answer is
+lost, revoke what was created and create one new session.
 
 When SeatLayer takes the Season's payments, renew a holder with no hosted page: read the price,
 start a checkout, and send the holder to `payment.url`. For a renewal taken by phone or at the box
