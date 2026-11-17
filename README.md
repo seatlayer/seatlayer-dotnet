@@ -104,14 +104,15 @@ new SeatLayerClient(secretKey, new SeatLayerClientOptions { HttpClient = factory
 
 ## Fixed renewable Seasons
 
-`client.Seasons` exposes all 87 trusted organiser operations: the 48 from version `0.7.0`,
-plus performances, package prices (`SeasonPackagePrice.PriceTypeKey`: `adult`, `child`,
-`concession`, `senior` or `student`), publishing, checkout tests, occurrence returns, holders,
-Season orders, hosted renewal links and notices, renewal quotes, intents and checkouts, sales and
-seat reports with CSV exports, and the
-bulk refund of a cancelled date (`RefundSeasonPerformanceAsync`) and the release of lapsed
-renewal offers (`ReleaseSeasonLapsedOffersAsync`) with their jobs
-(`ListSeasonBulkJobsAsync`, `RetrieveSeasonBulkJobAsync`).
+`client.Seasons` has all 90 season operations: seasons and their packages, dates and package prices
+(per price type, set with `SeasonPackagePrice.PriceTypeKey`: `adult`, `child`, `concession`,
+`senior` or `student`), sales windows, checkout tests, buyer sessions and booking, holder imports
+and the holder list, season orders, renewals (offers, quotes, intents, checkouts and hosted renewal
+links), date changes and cancellations, season seats, bulk refunds with their jobs, sales and seat
+reports, CSV exports, audit and support export. The bulk refund of a cancelled date is
+`RefundSeasonPerformanceAsync`, the release of lapsed renewal offers is
+`ReleaseSeasonLapsedOffersAsync`, and their jobs are read with `ListSeasonBulkJobsAsync` and
+`RetrieveSeasonBulkJobAsync`.
 Validate compatible events before creation, then keep the secret key on your server and give the
 browser `SeasonPicker` only the show-once, origin-bound buyer token.
 
@@ -519,7 +520,7 @@ payment gateway, sales readiness and state, the booking fee, and discount codes.
 | `Webhooks` | `ListAsync` `CreateAsync` `UpdateAsync` `DeleteAsync` `ListDeliveriesAsync` |
 | `Workspaces` | `ListAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` |
 | `PerformanceGroups` | `ListAsync` `CreateAsync` `RetrieveAsync` `DeleteAsync` `ActivateAsync` `CloseAsync` `RetrieveLifecycleAsync` `CreateBuyerAccessSessionAsync` `ListBuyerAccessSessionsAsync` `RevokeBuyerAccessSessionAsync` `RetrieveHoldAsync` `BookHoldAsync` `RetrieveBookingAsync` |
-| `Seasons` | 83 operations for catalogue and Plan lifecycle, performances and package prices, publishing and checkout tests, sales windows, buyer access and booking, holder imports, holders and Season orders, renewals and hosted renewal links, occurrence amendments, returns and reclaims, bulk refunds and jobs, reports and CSV exports, audit, outbox, and support export |
+| `Seasons` | 90 operations for catalogue and Plan lifecycle, performances and package prices, publishing and checkout tests, sales windows, buyer access and booking, holder imports, holders and Season orders, renewals and hosted renewal links, occurrence amendments, returns and reclaims, bulk refunds and jobs, reports and CSV exports, audit, outbox, and support export |
 
 Full reference: [SeatLayer .NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/)
 
