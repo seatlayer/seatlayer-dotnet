@@ -20,13 +20,13 @@ through one typed ticketing API client.
 > **Server-side only.** This library authenticates with your secret key. Never ship it in a client
 > application. Browser surfaces get short-lived, origin-bound tokens that you mint here.
 
-Two-step shape: the buyer picks and holds seats in the client with your public key, then this SDK confirms the booking from your server with your secret key while your platform keeps checkout and its own payment provider.
+**How it works:** the buyer picks and holds seats in your website or app with your public key. Your server then reads the hold, takes the payment through your own provider, and books the seats with this SDK and your secret key.
 
-**Start here:** [Quickstart](https://docs.seatlayer.io/start/quickstart/) · [Holds and checkout](https://docs.seatlayer.io/buyer-sdk/holds-and-checkout/) · [.NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/) · [SDK catalog](https://docs.seatlayer.io/sdk-catalog.json) · [Pricing](https://seatlayer.io/pricing/): $0 entry, 100 free confirmed-sold-seat credits per organization each month, then $0.10 down to $0.05 a credit, and credits never expire.
+**Start here:** [Quickstart](https://docs.seatlayer.io/start/quickstart/) · [Holds and checkout](https://docs.seatlayer.io/buyer-sdk/holds-and-checkout/) · [.NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/) · [SDK catalog](https://docs.seatlayer.io/sdk-catalog.json) · [Pricing](https://seatlayer.io/pricing/): 100 sold seats free every month, then 10¢ down to 5¢ per sold seat. No subscription, and purchased credits never expire. Test mode is free.
 
 ## Scale evidence
 
-Benchmarked on public 100,000-, 150,000- and 200,000-seat venue fixtures on 15 September 2026: 200,000 seats chart-ready in 1.95 s, desktop, local production build. Fixtures, method and run logs: https://github.com/seatlayer/seatlayer-performance. Live 200,000-seat stadium demo: https://app.seatlayer.io/demo/play/century-stadium-200k. This is renderer evidence, not a concurrent-buyer claim.
+Benchmarked on public 100,000-, 150,000- and 200,000-seat venue fixtures on 15 September 2026: 200,000 seats chart-ready in 1.95 s, desktop, local production build. Tested at 10,000 simulated concurrent buyers on one 12,000-seat event (18 September 2026): engine-side hold latency p99 9 ms, zero server errors. Method, fixtures and run files: https://github.com/seatlayer/seatlayer-performance. Live 200,000-seat stadium demo: https://app.seatlayer.io/demo/play/century-stadium-200k.
 
 ## Install the .NET seat booking SDK
 
@@ -40,7 +40,7 @@ Or pin it in your project file:
 <PackageReference Include="SeatLayer" Version="0.9.0" />
 ```
 
-`SeatLayer` is published on NuGet; `0.9.0` is the current release. Requires .NET 8 or newer. **No package dependencies**: `HttpClient`, `System.Text.Json` and
+`SeatLayer` is published on NuGet. Requires .NET 8 or newer. **No package dependencies**: `HttpClient`, `System.Text.Json` and
 `HMACSHA256` all ship with the framework, so the SDK forces no version on your application.
 
 ## Quick start
@@ -104,22 +104,24 @@ new SeatLayerClient(secretKey, new SeatLayerClientOptions { HttpClient = factory
 
 ## Fixed renewable Seasons
 
-`client.Seasons` exposes all 87 trusted organiser operations: the 48 from version `0.7.0`,
-plus performances, package prices (`SeasonPackagePrice.PriceTypeKey`: `adult`, `child`,
-`concession`, `senior` or `student`), publishing, checkout tests, occurrence returns, holders,
-Season orders, hosted renewal links and notices, renewal quotes, intents and checkouts, sales and
-seat reports with CSV exports, and the
-bulk refund of a cancelled date (`RefundSeasonPerformanceAsync`) and the release of lapsed
-renewal offers (`ReleaseSeasonLapsedOffersAsync`) with their jobs
-(`ListSeasonBulkJobsAsync`, `RetrieveSeasonBulkJobAsync`).
+`client.Seasons` has all 90 season operations: seasons and their packages, dates and package prices
+(per price type, set with `SeasonPackagePrice.PriceTypeKey`: `adult`, `child`, `concession`,
+`senior` or `student`), sales windows, checkout tests, buyer sessions and booking, holder imports
+and the holder list, season orders, renewals (offers, quotes, intents, checkouts and hosted renewal
+links), date changes and cancellations, season seats, bulk refunds with their jobs, sales and seat
+reports, CSV exports, audit and support export. The bulk refund of a cancelled date is
+`RefundSeasonPerformanceAsync`, the release of lapsed renewal offers is
+`ReleaseSeasonLapsedOffersAsync`, and their jobs are read with `ListSeasonBulkJobsAsync` and
+`RetrieveSeasonBulkJobAsync`.
 Validate compatible events before creation, then keep the secret key on your server and give the
 browser `SeasonPicker` only the show-once, origin-bound buyer token.
 
-After the test hold/book/cancel journey and matching webhook deliveries,
-`ValidateSeasonBuyerRehearsalAsync(seasonKey)` sends no evidence body; SeatLayer discovers the
-retained chain automatically. Retrieved Season holds contain inventory identity, not an
-authoritative amount. Your platform owns package price, payment, order, tax, refunds, benefits,
-and ticket or pass delivery.
+Before you open sales, run one test hold, booking and cancellation with their webhooks, then call
+`ValidateSeasonBuyerRehearsalAsync(seasonKey)`. It finds those test records itself, so it takes no
+body. With your own checkout, until a test like this or a checkout test has passed, opening sales answers with a
+`checkout_test_missing` warning. A season hold lists each date's seat, category and quantity but no
+price: when you run your own checkout, you set the package price and take the payment, and you
+issue the tickets.
 
 ```csharp
 var validation = await client.Seasons.ValidateSeasonAsync(new SeasonSelectionRequest
@@ -135,9 +137,11 @@ var created = await client.Seasons.CreateSeasonAsync(new SeasonCreateRequest
 });
 ```
 
-Season lifecycle, booking, cancellation, and renewal commits are domain-idempotent and therefore
-remain single-attempt. The 26 Season operations with exact header replay are retried; the full
-client has 41 exact-header-replay mutations.
+A `202` answer means the work was accepted and is still running: keep the returned operation id and
+poll `RetrieveSeasonLifecycleAsync` until it finishes. Bookings, cancellations and renewal commits
+are sent once and never retried by the SDK, so give each one your own stable id; sending the same
+id again is safe. A buyer session is sent once too, and repeating it is not safe: if its answer is
+lost, revoke what was created and create one new session.
 
 When SeatLayer takes the Season's payments, renew a holder with no hosted page: read the price,
 start a checkout, and send the holder to `payment.url`. For a renewal taken by phone or at the box
@@ -369,9 +373,8 @@ var session = await client.Sessions.CreateManageSessionAsync(
 
 `capabilities` is **required** by this SDK even though the raw API safely defaults an omitted list
 to view-only (`event:view`). Keeping the argument required makes browser authority visible at every
-call site. Grant the smallest set the page needs. For Platform/SDK events, `event:cancel` returns a
-booking's inventory to sale but does not move gateway money; eligible Managed Ticketing refunds use
-the separate `event:refund` capability.
+call site. Grant the smallest set the page needs. `event:cancel` puts a booking back on sale; it
+does not refund anyone. To refund an order that SeatLayer's checkout took, grant `event:refund`.
 
 ## Webhooks
 
@@ -519,7 +522,7 @@ payment gateway, sales readiness and state, the booking fee, and discount codes.
 | `Webhooks` | `ListAsync` `CreateAsync` `UpdateAsync` `DeleteAsync` `ListDeliveriesAsync` |
 | `Workspaces` | `ListAsync` `CreateAsync` `RetrieveAsync` `UpdateAsync` |
 | `PerformanceGroups` | `ListAsync` `CreateAsync` `RetrieveAsync` `DeleteAsync` `ActivateAsync` `CloseAsync` `RetrieveLifecycleAsync` `CreateBuyerAccessSessionAsync` `ListBuyerAccessSessionsAsync` `RevokeBuyerAccessSessionAsync` `RetrieveHoldAsync` `BookHoldAsync` `RetrieveBookingAsync` |
-| `Seasons` | 83 operations for catalogue and Plan lifecycle, performances and package prices, publishing and checkout tests, sales windows, buyer access and booking, holder imports, holders and Season orders, renewals and hosted renewal links, occurrence amendments, returns and reclaims, bulk refunds and jobs, reports and CSV exports, audit, outbox, and support export |
+| `Seasons` | 90 operations for catalogue and Plan lifecycle, performances and package prices, publishing and checkout tests, sales windows, buyer access and booking, holder imports, holders and Season orders, renewals and hosted renewal links, occurrence amendments, returns and reclaims, bulk refunds and jobs, reports and CSV exports, audit, outbox, and support export |
 
 Full reference: [SeatLayer .NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/)
 
@@ -554,12 +557,11 @@ reference are not sold again.
 
 ### Can I use my own payment provider?
 
-Yes. This server SDK does not process payment in a Platform/SDK integration. Charge through the
-provider you already use, calculating the total from each server-inspected hold item's
-`unitPrice`, `quantity`, and `currency`, then call `Inventory.BookAsync` with your charge or order
-id as the `bookingRef`. Managed Ticketing is a separate product path with organizer-connected
-payments. The [holds and checkout guide](https://docs.seatlayer.io/buyer-sdk/holds-and-checkout/)
-walks through the full handoff.
+Yes. Nothing in this SDK takes a payment: your server charges the hold's total through the provider
+you already use, then books the seats with your order id as `bookingRef`, and SeatLayer never
+touches the money. If you would rather SeatLayer run the checkout for an event
+(`Events.ReplaceEventBuyerCheckoutAsync`), buyers pay through one of 14 payment gateways, including
+Stripe, PayPal and Square, straight into your own account.
 
 ## Continue your .NET integration
 
