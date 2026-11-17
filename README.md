@@ -373,9 +373,8 @@ var session = await client.Sessions.CreateManageSessionAsync(
 
 `capabilities` is **required** by this SDK even though the raw API safely defaults an omitted list
 to view-only (`event:view`). Keeping the argument required makes browser authority visible at every
-call site. Grant the smallest set the page needs. For Platform/SDK events, `event:cancel` returns a
-booking's inventory to sale but does not move gateway money; eligible Managed Ticketing refunds use
-the separate `event:refund` capability.
+call site. Grant the smallest set the page needs. `event:cancel` puts a booking back on sale; it
+does not refund anyone. To refund an order that SeatLayer's checkout took, grant `event:refund`.
 
 ## Webhooks
 
