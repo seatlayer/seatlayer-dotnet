@@ -107,7 +107,7 @@ own its lifetime:
 new SeatLayerClient(secretKey, new SeatLayerClientOptions { HttpClient = factory.CreateClient() });
 ```
 
-## Fixed renewable Seasons
+## Season tickets (Fixed Renewable Seasons)
 
 `client.Seasons` has all 90 season operations: seasons and their packages, dates and package prices
 (per price type, set with `SeasonPackagePrice.PriceTypeKey`: `adult`, `child`, `concession`,
