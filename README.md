@@ -457,11 +457,11 @@ support requests.
 ## Reliability
 
 **Retries.** Reads (`GET`/`HEAD`) retry 429, 408 and 5xx with exponential backoff and full jitter;
-`Retry-After` wins when the server sends it. 41 mutations use exact header replay:
+`Retry-After` wins when the server sends it. 43 mutations use exact header replay:
 
 - `Charts.CreateAsync`, `Charts.CopyAsync`, `Templates.InstantiateTemplateAsync`,
   `Events.CreateAsync`, `Workspaces.CreateAsync`, `PerformanceGroups.CreateAsync`
-- 26 on `Seasons`: `CreateSeasonAsync`, `UpdateSeasonAsync`, `DeleteSeasonAsync`,
+- 28 on `Seasons`: `CreateSeasonAsync`, `UpdateSeasonAsync`, `DeleteSeasonAsync`,
   `CreateSeasonPlanAsync`, `DuplicateSeasonToLiveAsync`, `CreateSeasonHolderImportAsync`,
   `CreateSeasonRenewalOffersAsync`, `CreateSeasonAmendmentAsync`,
   `CreateSeasonHolderImportFromSeasonAsync`, `CreateSeasonPerformancesAsync`,
@@ -470,7 +470,7 @@ support requests.
   `ReplaceSeasonPackagePricesAsync`, `AttachSeasonPlanPerformanceAsync`,
   `DeleteSeasonPlanPerformanceAsync`, `MarkSeasonPerformancePastAsync`, `RefundSeasonOrderAsync`,
   `CancelSeasonOrderAsync`, `CancelSeasonOrderDateAsync`, `RefundSeasonPerformanceAsync`,
-  `CreateSeasonRenewalCheckoutAsync`, and `ReleaseSeasonLapsedOffersAsync`
+  `CreateSeasonRenewalCheckoutAsync`, `SetAsideSeasonBlockAsync`, `ReleaseSeasonBlockAsync`, and `ReleaseSeasonLapsedOffersAsync`
 - `Holders.UpdateHolderAsync`, `Holders.CreateHolderTransferAsync`,
   `Holders.CreateHolderReturnAsync`, `Holders.CreateHolderRenewalCheckoutAsync`,
   `Orders.RefundEventOrderAsync`, and `Orders.CancelEventOrderAsync`
@@ -480,7 +480,7 @@ support requests.
 Other 4xx responses are never retried. A cancelled `CancellationToken` stops the loop immediately
 rather than being treated as a transient fault.
 
-**Idempotency.** Those 41 replay-backed operations carry an `Idempotency-Key`, generated when you
+**Idempotency.** Those 43 replay-backed operations carry an `Idempotency-Key`, generated when you
 do not supply one and reused across attempts. All remaining SDK mutations are single-attempt. Some
 have a server-side domain idempotency contract, but the SDK does not retry them automatically. This
 includes inventory holds and bookings, show-once credential or secret creation, unsupported
@@ -557,19 +557,18 @@ free.
 Create a client with your secret key, read the buyer's hold with `Inventory.RetrieveHoldAsync` to
 get the real seats and prices, take the payment, then call
 `Inventory.BookAsync(eventKey, holdId, bookingRef: ...)` with your own order id as `bookingRef`. For
-phone orders, the box office and comps, `Inventory.BookBestAvailableAsync` picks and books the best
-seats in one call, with no browser involved. Keep that `bookingRef` for the order: it finds the
+phone orders, the box office and comps, `Inventory.BookBestAvailableAsync` picks and books the best available seats in one call, with no browser involved. Keep that `bookingRef` for the order: it finds the
 booking again in `Inventory.ListBookingsAsync` and cancels it with `Inventory.UnbookAsync`.
 
 ### How do I stop two buyers taking the same seat?
 
-In the SeatLayer picker, a buyer's seats are held when they go to checkout; with the bare chart,
-your code calls hold. The hold keeps those seats for that buyer for a set time, which you can change
-per event, and every other buyer sees them taken at once. Your server reads the hold with
+In the SeatLayer picker, a buyer's seats are held when they go to checkout; with the headless `SeatingChart`, your page calls `hold()`. The hold keeps those seats for that buyer for a set time, which you can change
+per event, and every other buyer sees them taken. Your server reads the hold with
 `Inventory.RetrieveHoldAsync`, charges from the prices it returns rather than anything the browser
 sent, and books it; `Inventory.ExtendHoldAsync` gives a slow checkout more time without letting the
-seats go. If a booking call times out, send it again with the same hold and the same `bookingRef`:
-seats already booked under that reference are never sold twice.
+seats go. If a booking call times out, check `Inventory.ListBookingsAsync` for that `bookingRef`, or repeat the exact same
+booking with the same hold and `bookingRef`: seats already booked under it are not sold again,
+though the repeat can return an empty booked list.
 
 ### Can I use my own payment provider?
 
