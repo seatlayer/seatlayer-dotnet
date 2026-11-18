@@ -1,15 +1,13 @@
-# SeatLayer .NET Server SDK for Reserved Seating
+# SeatLayer .NET SDK: seat booking, reserved seating and season ticket API
 
 [![CI](https://github.com/seatlayer/seatlayer-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/seatlayer/seatlayer-dotnet/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/SeatLayer.svg)](https://www.nuget.org/packages/SeatLayer)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111827.svg)](LICENSE)
 
-The official .NET client for the SeatLayer API. The `SeatLayer` NuGet package lets a C# backend inspect seat holds, price orders from server data, book reserved seats and verify webhooks, with no package dependencies. SeatLayer is seating chart and reserved-seat ticketing software built for venues up to stadium scale.
-
-SeatLayer's official .NET server SDK is the **trusted side** of its reserved seating and seat
-booking API: inspect the holds a buyer created, price from server data, and book with a stable
-`bookingRef`. From C# you manage seating charts, events, sales channels, and live seat inventory
-through one typed ticketing API client.
+SeatLayer's official .NET SDK gives ASP.NET Core and other C# backends on .NET 8 and newer one
+async, thread-safe `SeatLayerClient` for reserved seating: register it as a singleton, read a
+buyer's held seats with their real prices, book them under your order id, and run season tickets and
+box office sales, with no package dependencies.
 
 [SeatLayer package on NuGet](https://www.nuget.org/packages/SeatLayer) ·
 [.NET server SDK guide](https://docs.seatlayer.io/server-sdk/dotnet/) ·
