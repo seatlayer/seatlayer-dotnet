@@ -612,6 +612,9 @@ as it is cancelled.
   (`llms.txt`) for an agent-readable map of the documentation.
 - [Explore every SeatLayer SDK on GitHub](https://github.com/seatlayer)
   across web, mobile, and server.
+- [Season ticket API guide](https://seatlayer.io/guides/season-ticket-api/): build a season end to end.
+- [Box office](https://seatlayer.io/box-office/): sell at the counter from the same live seats.
+- [SDK and API overview](https://seatlayer.io/developers/) and [pricing](https://seatlayer.io/pricing/).
 
 ## SeatLayer SDK ecosystem
 
@@ -619,6 +622,8 @@ as it is cancelled.
 |---|---|
 | JavaScript | [`@seatlayer/js`](https://www.npmjs.com/package/@seatlayer/js) |
 | React | [`@seatlayer/react`](https://www.npmjs.com/package/@seatlayer/react) |
+| Vue | [`@seatlayer/vue`](https://www.npmjs.com/package/@seatlayer/vue) |
+| Angular | [`@seatlayer/angular`](https://www.npmjs.com/package/@seatlayer/angular) |
 | React Native | [`@seatlayer/react-native`](https://www.npmjs.com/package/@seatlayer/react-native) |
 | iOS | [`seatlayer-ios`](https://github.com/seatlayer/seatlayer-ios) |
 | Flutter | [`seatlayer`](https://pub.dev/packages/seatlayer) |
