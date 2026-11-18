@@ -533,32 +533,43 @@ Full reference: [SeatLayer .NET server SDK guide](https://docs.seatlayer.io/serv
 
 ## Frequently asked questions
 
-### How do I book seats from a .NET application?
+### What does the SeatLayer API do for a ticketing platform?
 
-Install the [`SeatLayer` NuGet package](https://www.nuget.org/packages/SeatLayer), construct a
-`SeatLayerClient` with your secret key, and call `Inventory.BookAsync` with the hold id and a
-stable `bookingRef`. When your own backend picks the seats (phone orders, box office, comps),
-`Inventory.BookBestAvailableAsync` and `Inventory.BoxOfficeBookAsync` book outright with no prior
-hold. Every booking method requires a booking reference, so each sale is tied to an immutable
-order id you can reconcile against later.
+SeatLayer gives your .NET backend one API for seating charts, live seat holds, booking, box office
+sales and season tickets, with official SDKs in Node.js, Python, PHP, Java, Go, Ruby and .NET.
+Buyers pick seats on the same SeatLayer map on the web, iOS, Android, Flutter and React Native, and
+your server books what they hold with your own order id, so a retried booking never sells a seat
+twice. You pay only for sold seats: 100 a month are free, then 10¢ down to 5¢ a seat, with no
+subscription, and holds and test mode cost nothing. Its measured results are under Scale evidence
+below.
 
-### What does the server SDK do that the buyer SDK does not?
+### How much does the SeatLayer API cost?
 
-The buyer SDK runs in the browser or mobile app and only **selects and holds** seats. This .NET
-SDK runs on your trusted server and **inspects and books** them. Your secret key never reaches a
-buyer surface: browsers receive short-lived, origin-bound tokens minted here through
-`Sessions.CreateManageSessionAsync` or `Channels.CreateBuyerAccessSessionAsync`. Always price a
-sale from `Inventory.RetrieveHoldAsync`, never from values the browser sent you.
+Building and testing is free: test mode has no time limit, needs no card and uses no credits. Live,
+with your own checkout, you pay one credit per confirmed sold seat: the first 100 sold seats each
+month are free, then 10¢ down to 5¢ a seat, with no subscription, and purchased credits never
+expire. Designing charts, showing the map, holds and releases never use a credit. An event that
+sells through SeatLayer's checkout costs $0.50 per ticket instead, and your first 25 tickets are
+free.
 
-### How do temporary seat holds work server-side?
+### How do I book seats from .NET?
 
-A hold reserves seats against concurrent buyers for a limited checkout window. From .NET you
-retrieve it with `Inventory.RetrieveHoldAsync`, whose item-level price, quantity, and currency are
-authoritative, and confirm it with `Inventory.BookAsync`. Use `Inventory.ExtendHoldAsync` for a long
-checkout instead of releasing and re-holding, which would hand the seats to whoever is racing for
-them. Booking is a single automatic attempt: after an unknown network outcome you may reconcile
-and repeat the exact same event, hold, and `bookingRef`; seats already booked under that
-reference are not sold again.
+Create a client with your secret key, read the buyer's hold with `Inventory.RetrieveHoldAsync` to
+get the real seats and prices, take the payment, then call
+`Inventory.BookAsync(eventKey, holdId, bookingRef: ...)` with your own order id as `bookingRef`. For
+phone orders, the box office and comps, `Inventory.BookBestAvailableAsync` picks and books the best
+seats in one call, with no browser involved. Keep that `bookingRef` for the order: it finds the
+booking again in `Inventory.ListBookingsAsync` and cancels it with `Inventory.UnbookAsync`.
+
+### How do I stop two buyers taking the same seat?
+
+In the SeatLayer picker, a buyer's seats are held when they go to checkout; with the bare chart,
+your code calls hold. The hold keeps those seats for that buyer for a set time, which you can change
+per event, and every other buyer sees them taken at once. Your server reads the hold with
+`Inventory.RetrieveHoldAsync`, charges from the prices it returns rather than anything the browser
+sent, and books it; `Inventory.ExtendHoldAsync` gives a slow checkout more time without letting the
+seats go. If a booking call times out, send it again with the same hold and the same `bookingRef`:
+seats already booked under that reference are never sold twice.
 
 ### Can I use my own payment provider?
 
@@ -567,6 +578,23 @@ you already use, then books the seats with your order id as `bookingRef`, and Se
 touches the money. If you would rather SeatLayer run the checkout for an event
 (`Events.ReplaceEventBuyerCheckoutAsync`), buyers pay through one of 14 payment gateways, including
 Stripe, PayPal and Square, straight into your own account.
+
+### How do I sell season tickets and renewals through an API?
+
+The season API is in this SDK: `client.Seasons` has all 90 season operations. You create a season
+from its dates with `CreateSeasonAsync`, the buyer chooses one seat in the browser `SeasonPicker`
+and the season hold takes it on every date at once, and your server books it with
+`BookSeasonHoldAsync`; for the next season, `CreateSeasonRenewalOffersAsync` offers each holder the
+same seat. `SetAsideSeasonBlockAsync` sets season seats aside on every date before sales open, and
+with your own checkout each season seat uses one SDK credit per date, like any other sold seat.
+
+### Does it work with ASP.NET Core?
+
+Yes. Register one `SeatLayerClient` as a singleton: it is thread-safe and keeps one long-lived
+`HttpClient`, or pass your own from `IHttpClientFactory` and the SDK will not dispose it. For
+webhooks, copy `Request.Body` into a buffer and pass those raw bytes to `Webhook.Verify`, never a
+model-bound object. Every call is async and takes a `CancellationToken`, which stops retries as soon
+as it is cancelled.
 
 ## Continue your .NET integration
 
